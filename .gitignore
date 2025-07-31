@@ -28,6 +28,7 @@ rm_file/
 /server/latest_log
 /server/__debug_bin*
 server/uploads/
+/server/config.yaml
 
 *.iml
 web/.pnpm-debug.log
@@ -40,3 +41,5 @@ web/pnpm-lock.yaml
 *.db
 *.sqlite
 *.sqlite3
+/temp
+server/config.yaml
