@@ -1,0 +1,13 @@
+package sugar
+
+type ServiceGroup struct {
+	SugarTeamsService
+	SugarTeamMembersService
+	SugarDbConnectionsService
+	SugarSemanticModelsService
+	SugarAgentsService
+	SugarCityPermissionsService
+	SugarRowLevelOverridesService
+	SugarExecutionLogsService
+	SugarWorkspacesService
+}
