@@ -68,11 +68,11 @@ func RegisterTables() {
 		os.Exit(0)
 	}
 
-	err = bizModel()
+	// err = bizModel()
 
-	if err != nil {
-		global.GVA_LOG.Error("register biz_table failed", zap.Error(err))
-		os.Exit(0)
-	}
+	// if err != nil {
+	// 	global.GVA_LOG.Error("register biz_table failed", zap.Error(err))
+	// 	os.Exit(0)
+	// }
 	global.GVA_LOG.Info("register table success")
 }
