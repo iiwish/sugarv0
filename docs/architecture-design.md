@@ -8,228 +8,67 @@
 - **响应式**：统一的状态管理，组件间高效通信
 - **可扩展**：为未来功能预留接口和扩展点
 
-### 1.2 核心架构层次
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        应用层 (App Layer)                    │
-├─────────────────────────────────────────────────────────────┤
-│                      插件层 (Plugin Layer)                   │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────┐ │
-│  │  文件树面板  │ │  AI聊天面板  │ │ 数据透视表   │ │  更多...  │ │
-│  └─────────────┘ └─────────────┘ └─────────────┘ └─────────┘ │
-├─────────────────────────────────────────────────────────────┤
-│                      核心层 (Core Layer)                     │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────┐ │
-│  │  表格引擎    │ │  公式系统    │ │  状态管理    │ │  事件总线 │ │
-│  └─────────────┘ └─────────────┘ └─────────────┘ └─────────┘ │
-├─────────────────────────────────────────────────────────────┤
-│                      基础层 (Base Layer)                     │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────┐ │
-│  │   Univer    │ │     Vue3     │ │    Pinia     │ │  Utils   │ │
-│  └─────────────┘ └─────────────┘ └─────────────┘ └─────────┘ │
-└─────────────────────────────────────────────────────────────┘
-```
+### 1.2 核心架构：组合式函数驱动
 
-## 2. 目录结构设计
+本应用采用先进的“组合式函数驱动”架构。该架构的核心思想是将所有复杂的初始化、业务逻辑和跨模块通信从视图层剥离，下沉到独立的、可复用的Vue组合式函数中。
 
 ```
-web/src/
-├── core/                           # 核心模块
-│   ├── univer/                     # Univer相关核心功能
-│   │   ├── engine/                 # 表格引擎
-│   │   │   ├── index.ts           # 引擎主入口
-│   │   │   ├── config.ts          # 引擎配置
-│   │   │   └── lifecycle.ts       # 生命周期管理
-│   │   ├── formula/                # 公式系统
-│   │   │   ├── index.ts           # 公式系统主入口
-│   │   │   ├── registry.ts        # 公式注册器
-│   │   │   ├── base/              # 基础公式类
-│   │   │   │   ├── BaseFormula.ts
-│   │   │   │   └── types.ts
-│   │   │   └── functions/         # 具体公式实现
-│   │   │       ├── lmdi.ts
-│   │   │       ├── financial/     # 金融类公式
-│   │   │       ├── statistical/   # 统计类公式
-│   │   │       └── custom/        # 自定义公式
-│   │   ├── events/                 # 事件系统
-│   │   │   ├── index.ts
-│   │   │   ├── EventBus.ts
-│   │   │   └── types.ts
-│   │   └── types/                  # 类型定义
-│   │       ├── index.ts
-│   │       ├── workbook.ts
-│   │       └── formula.ts
-│   ├── plugin/                     # 插件系统
-│   │   ├── index.ts               # 插件管理器
-│   │   ├── PluginManager.ts       # 插件管理器实现
-│   │   ├── BasePlugin.ts          # 插件基类
-│   │   └── types.ts               # 插件类型定义
-│   └── store/                      # 状态管理
-│       ├── index.ts
-│       ├── modules/
-│       │   ├── workbook.ts        # 工作簿状态
-│       │   ├── ui.ts              # UI状态
-│       │   ├── formula.ts         # 公式状态
-│       │   └── plugin.ts          # 插件状态
-│       └── types.ts
-├── plugins/                        # 插件实现
-│   ├── file-tree/                  # 文件树插件
-│   │   ├── index.ts
-│   │   ├── FileTreePlugin.ts
-│   │   ├── components/
-│   │   │   ├── FileTree.vue
-│   │   │   ├── FileNode.vue
-│   │   │   └── FileActions.vue
-│   │   ├── store/
-│   │   │   └── fileTree.ts
-│   │   └── api/
-│   │       └── fileTree.js
-│   ├── ai-chat/                    # AI聊天插件
-│   │   ├── index.ts
-│   │   ├── AiChatPlugin.ts
-│   │   ├── components/
-│   │   │   ├── ChatPanel.vue
-│   │   │   ├── MessageList.vue
-│   │   │   └── InputBox.vue
-│   │   ├── store/
-│   │   │   └── aiChat.ts
-│   │   └── api/
-│   │       └── aiChat.js
-│   └── pivot-table/                # 数据透视表插件
-│       ├── index.ts
-│       ├── PivotTablePlugin.ts
-│       ├── components/
-│       │   ├── PivotPanel.vue
-│       │   ├── FieldList.vue
-│       │   └── PivotConfig.vue
-│       ├── store/
-│       │   └── pivotTable.ts
-│       └── api/
-│           └── pivotTable.js
-├── layouts/                        # 布局组件
-│   ├── MainLayout.vue             # 主布局
-│   ├── components/
-│   │   ├── Header.vue
-│   │   ├── Sidebar.vue
-│   │   ├── ContentArea.vue
-│   │   └── PanelContainer.vue
-│   └── types.ts
-├── view/
-│   └── main/
-│       └── index.vue              # 简化的主页面
-└── composables/                    # 组合式函数
-    ├── useUniver.ts               # Univer相关逻辑
-    ├── usePlugin.ts               # 插件相关逻辑
-    └── useWorkbook.ts             # 工作簿相关逻辑
+ ┌──────────────────┐       ┌───────────────────────┐      ┌────────────────────────┐
+ │ App Entry (View) │──────▶│  useApp (Orchestrator)  │─────▶│ usePluginManager (Core)  │
+ │ (sugar/index.vue)│       │  (composables/useApp.ts)│      │(composables/usePlugin...)│
+ └──────────────────┘       └───────────────────────┘      └────────────────────────┘
+           │                         │                                │
+           ▼                         ▼                                ▼
+ ┌──────────────────┐       ┌────────────────────────┐      ┌────────────────────────┐
+ │UI Rendering Only │       │   Coordinates Startup/ │      │ Manages All Plugins    │
+ │(Just render HTML)│       │   Shutdown Processes   │      │(Register, Activate, etc)│
+ └──────────────────┘       └────────────────────────┘      └────────────────────────┘
+                                      │
+                                      ▼
+                             ┌──────────────────────────┐
+                             │ useWorkbookManager (Core)  │
+                             │(composables/useWorkbook...)│
+                             └──────────────────────────┘
+                                      │
+                                      ▼
+                             ┌──────────────────────────┐
+                             │ Manages Workbook Data &  │
+                             │ Interacts with UniverAPI │
+                             └──────────────────────────┘
 ```
 
-## 3. 核心模块设计
+这个流程确保了视图层 ([`web/src/view/sugar/index.vue`]) 保持极度简洁，仅负责UI渲染和调用 `useApp()`，而所有复杂的生命周期和逻辑管理都由 `useApp.ts` 进行集中协调。
 
-### 3.1 表格引擎 (Engine)
-负责Univer实例的创建、配置和生命周期管理。
+## 2. 核心模块详解
 
-### 3.2 公式系统 (Formula System)
-- **注册器模式**：统一管理公式注册和卸载
-- **插件化公式**：支持动态加载公式模块
-- **类型安全**：完整的TypeScript类型定义
+*   **组合式函数 (`web/src/composables/`)**: 存放可复用的Vue Composition API逻辑，这是新架构的核心。
+    *   **`useApp.ts`**: ([`web/src/composables/useApp.ts`]) 作为应用的“大脑”，负责协调所有模块的启动和关闭。它调用 `usePluginManager` 和 `useWorkbookManager`，并编排整个初始化流程，最后通过 `onMounted` 钩子自动运行。
+    *   **`usePluginManager.ts`**: ([`web/src/composables/usePluginManager.ts`]) 封装了与插件系统相关的所有交互，如插件的注册、激活和停用。
+    *   **`useWorkbookManager.ts`**: ([`web/src/composables/useWorkbookManager.ts`]) 专注于工作簿的管理，包括加载数据、创建Univer实例以及与Pinia状态同步。
 
-### 3.3 插件系统 (Plugin System)
-- **生命周期管理**：install、activate、deactivate、uninstall
-- **依赖管理**：插件间依赖关系处理
-- **热插拔**：运行时动态加载/卸载插件
+*   **核心模块 (`web/src/core/`)**: 封装了与Univer表格引擎交互的核心逻辑，包括插件管理、事件总线和状态管理。
+    *   `plugin/`: 包含插件管理器 ([`PluginManager.ts`](web/src/core/plugin/PluginManager.ts)) 和插件基类 ([`BasePlugin.ts`](web/src/core/plugin/BasePlugin.ts))，是插件化架构的基石。
+    *   `events/`: 提供了全局事件总线 ([`EventBus.ts`](web/src/core/events/EventBus.ts))，用于实现模块间的解耦通信。
+    *   `store/`: 使用 Pinia 进行状态管理，例如管理工作簿状态 ([`workbook.ts`](web/src/core/store/modules/workbook.ts))。
 
-### 3.4 状态管理 (State Management)
-- **模块化Store**：按功能域划分状态模块
-- **响应式通信**：插件间通过状态变化通信
-- **持久化**：关键状态的本地存储
+*   **插件实现 (`web/src/plugins/`)**: 存放所有可插拔的功能模块。
+    *   `univer-core/`: ([`web/src/plugins/univer-core/index.ts`]) 封装了对 Univer 核心API的调用，是所有表格功能的基础。
+    *   `custom-formulas/`: ([`web/src/plugins/custom-formulas/index.ts`]) 实现了自定义公式功能，例如金融领域的 [`LMDI` 公式](web/src/plugins/custom-formulas/formulas/financial.ts)。
 
-### 3.5 事件系统 (Event System)
-- **发布订阅模式**：解耦组件间通信
-- **类型安全事件**：TypeScript事件类型定义
-- **事件命名空间**：避免事件名冲突
+## 3. 实施计划
 
-## 4. 插件开发规范
+本轮重构已完成核心阶段，后续可按计划继续开发功能插件。
 
-### 4.1 插件基类
-```typescript
-abstract class BasePlugin {
-  abstract name: string
-  abstract version: string
-  abstract dependencies?: string[]
-  
-  abstract install(): Promise<void>
-  abstract activate(): Promise<void>
-  abstract deactivate(): Promise<void>
-  abstract uninstall(): Promise<void>
-}
-```
+### 阶段一：核心重构 (已完成)
+1.  **[√]** 创建 `useWorkbookManager` `useApp` 等核心组合式函数。
+2.  **[√]** 将 `index.vue` 重构为瘦组件。
+3.  **[√]** 建立由 `useApp` 驱动的初始化流程。
 
-### 4.2 插件注册
-```typescript
-// 插件自动注册机制
-export default {
-  name: 'file-tree',
-  version: '1.0.0',
-  plugin: FileTreePlugin,
-  dependencies: ['workbook']
-}
-```
+### 阶段二：功能插件开发
+1.  开发文件树插件
+2.  开发AI聊天插件
+3.  开发数据透视表插件
 
-## 5. 状态管理方案
+## 4. 扩展性考虑
 
-### 5.1 状态模块划分
-- **workbook**: 工作簿数据、当前选中等
-- **ui**: 界面状态、面板显示/隐藏等
-- **formula**: 公式注册状态、计算结果缓存等
-- **plugin**: 插件状态、配置等
-
-### 5.2 跨插件通信
-通过Pinia状态变化和事件总线实现插件间通信。
-
-## 6. 实施计划
-
-### 阶段一：核心重构
-1. 重构表格引擎封装
-2. 实现公式注册系统
-3. 建立基础状态管理
-
-### 阶段二：插件系统
-1. 实现插件管理器
-2. 重构现有功能为插件
-3. 建立插件开发规范
-
-### 阶段三：功能插件
-1. 开发文件树插件
-2. 开发AI聊天插件
-3. 开发数据透视表插件
-
-### 阶段四：优化完善
-1. 性能优化
-2. 错误处理完善
-3. 文档和测试补充
-
-## 7. 技术选型
-
-- **前端框架**: Vue 3 + Composition API
-- **状态管理**: Pinia
-- **表格引擎**: Univer
-- **构建工具**: Vite
-- **类型检查**: TypeScript
-- **UI组件**: Element Plus (继承现有)
-
-## 8. 扩展性考虑
-
-### 8.1 公式扩展
-- 支持公式分类管理
-- 支持公式版本控制
-- 支持公式权限控制
-
-### 8.2 插件扩展
-- 支持第三方插件
-- 支持插件市场
-- 支持插件配置界面
-
-### 8.3 主题扩展
-- 支持多主题切换
-- 支持自定义主题
-- 支持插件主题适配
+得益于新的组合式函数驱动架构，应用的扩展性得到了极大增强。未来无论是增加新的面板、工具栏按钮还是复杂的后台交互，都可以通过开发新的插件并由 `usePluginManager` 进行管理来实现，而无需改动核心的应用启动流程。

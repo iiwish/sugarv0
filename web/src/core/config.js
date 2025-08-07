@@ -4,8 +4,8 @@
 const greenText = (text) => `\x1b[32m${text}\x1b[0m`
 
 const config = {
-  appName: 'Gin-Vue-Admin',
-  appLogo: 'logo.png',
+  appName: 'Sugar数格',
+  appLogo: '',
   showViteLogo: true,
   logs: []
 }
@@ -14,17 +14,8 @@ export const viteLogo = (env) => {
   if (config.showViteLogo) {
     console.log(
       greenText(
-        `> 欢迎使用Gin-Vue-Admin，开源地址：https://github.com/flipped-aurora/gin-vue-admin`
+        `> 欢迎使用Sugar数格，开源地址：https://github.com/flipped-aurora/gin-vue-admin`
       )
-    )
-    console.log(greenText(`> 当前版本:v2.8.3`))
-    console.log(greenText(`> 加群方式:微信：shouzi_1994 QQ群：470239250`))
-    console.log(
-      greenText(`> 项目地址：https://github.com/flipped-aurora/gin-vue-admin`)
-    )
-    console.log(greenText(`> 插件市场:https://plugin.gin-vue-admin.com`))
-    console.log(
-      greenText(`> GVA讨论社区:https://support.qq.com/products/371961`)
     )
     console.log(
       greenText(
