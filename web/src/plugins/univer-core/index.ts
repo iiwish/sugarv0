@@ -1,6 +1,7 @@
 import type { App } from 'vue'
 import type { IWorkbookData } from '@univerjs/core'
 import { BasePlugin } from '@/core/plugin/BasePlugin'
+import type { IUniverInstanceService } from '@univerjs/core';
 import type { PluginContext, PluginMetadata } from '@/core/types/plugin'
 import type {
   WorkbookCreatedEvent,
@@ -24,6 +25,7 @@ export class UniverCorePlugin extends BasePlugin {
   private univerAPI: any = null
   private workbook: any = null
   private container: string = ''
+  private _renderEngine: any = null; // 新增：保存渲染引擎
 
   constructor() {
     const metadata: PluginMetadata = {
@@ -55,7 +57,8 @@ export class UniverCorePlugin extends BasePlugin {
   }
 
   async onDeactivate(context: PluginContext): Promise<void> {
-    await this.dispose()
+    // 只清理工作簿，保留Univer实例以便快速恢复
+    await this.disposeWorkbook()
     context.logger.info('Univer核心插件已停用')
   }
 
@@ -89,7 +92,7 @@ export class UniverCorePlugin extends BasePlugin {
       }
 
       // 创建Univer实例
-      const { univerAPI } = createUniver({
+      const { univerAPI, renderEngine } = createUniver({
         locale: LocaleType.ZH_CN,
         locales: mergedLocales,
         presets: [
@@ -98,6 +101,7 @@ export class UniverCorePlugin extends BasePlugin {
           }),
         ],
       })
+      this._renderEngine = renderEngine; // 保存渲染引擎
 
       this.univerAPI = univerAPI
       
@@ -125,6 +129,18 @@ export class UniverCorePlugin extends BasePlugin {
     }
 
     try {
+      // 如果工作簿已存在，先销毁它
+      if (this.workbook) {
+        await this.disposeWorkbook()
+      }
+
+      // 检查是否已存在相同ID的工作簿，如果存在则先销毁
+      const existingWorkbook = this.univerAPI.getUniverSheet(data.id)
+      if (existingWorkbook) {
+        this.univerAPI.disposeUnit(data.id)
+        this.context?.logger.info(`已销毁存在的工作簿: ${data.id}`)
+      }
+
       this.workbook = this.univerAPI.createWorkbook(data)
       
       // 触发工作簿创建事件
@@ -198,17 +214,7 @@ export class UniverCorePlugin extends BasePlugin {
    * 销毁Univer实例
    */
   private async dispose(): Promise<void> {
-    if (this.workbook) {
-      // 触发工作簿销毁事件
-      const event: WorkbookDisposedEvent = {
-        type: 'workbook:disposed',
-        payload: { workbook: this.workbook },
-        timestamp: Date.now(),
-      }
-      
-      this.context?.eventBus.emit('workbook:disposed', event)
-      this.workbook = null
-    }
+    await this.disposeWorkbook()
 
     if (this.univerAPI) {
       this.univerAPI.dispose()
@@ -221,6 +227,23 @@ export class UniverCorePlugin extends BasePlugin {
         timestamp: Date.now(),
       }
       this.context?.eventBus.emit('univer:disposed', event)
+    }
+  }
+
+  /**
+   * 只销毁工作簿，保留Univer实例
+   */
+  private async disposeWorkbook(): Promise<void> {
+    if (this.workbook) {
+      // 触发工作簿销毁事件
+      const event: WorkbookDisposedEvent = {
+        type: 'workbook:disposed',
+        payload: { workbook: this.workbook },
+        timestamp: Date.now(),
+      }
+      
+      this.context?.eventBus.emit('workbook:disposed', event)
+      this.workbook = null
     }
   }
 
@@ -238,6 +261,31 @@ export class UniverCorePlugin extends BasePlugin {
   private handleWorkbookDataChanged(event: any): void {
     // 可以在这里处理工作簿数据变化的逻辑
     this.context?.logger.debug('工作簿数据已变化:', event.payload)
+  }
+
+  /**
+   * 分离渲染容器
+   */
+  public detachContainer(): void {
+    if (this._renderEngine) {
+      this._renderEngine.setContainer(null);
+      this.context?.logger.info('Univer 渲染容器已分离');
+    }
+  }
+
+  /**
+   * 重新附加渲染容器
+   */
+  public reattachContainer(containerId: string): void {
+    if (this._renderEngine) {
+      const container = document.getElementById(containerId);
+      if (container) {
+        this._renderEngine.setContainer(container);
+        this.context?.logger.info('Univer 渲染容器已重新附加');
+      } else {
+        this.context?.logger.error(`无法找到容器 #${containerId}`);
+      }
+    }
   }
 }
 

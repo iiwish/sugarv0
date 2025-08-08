@@ -12,6 +12,7 @@ type ApiGroup struct {
 	SugarRowLevelOverridesApi
 	SugarExecutionLogsApi
 	SugarWorkspacesApi
+	SugarFormulaQueryApi
 }
 
 var (
@@ -24,4 +25,5 @@ var (
 	sugarRowLevelOverridesService = service.ServiceGroupApp.SugarServiceGroup.SugarRowLevelOverridesService
 	sugarExecutionLogsService     = service.ServiceGroupApp.SugarServiceGroup.SugarExecutionLogsService
 	sugarWorkspacesService        = service.ServiceGroupApp.SugarServiceGroup.SugarWorkspacesService
+	sugarFormulaQueryService      = service.ServiceGroupApp.SugarServiceGroup.SugarFormulaQueryService
 )

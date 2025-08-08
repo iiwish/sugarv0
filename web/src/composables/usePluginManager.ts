@@ -49,11 +49,55 @@ export function usePluginManager() {
       // 创建插件管理器
       pluginManager.value = new PluginManager(context)
       
+      // 恢复插件状态（如果有的话）
+      await restorePluginStates()
+      
       isInitialized.value = true
       console.log('插件管理器初始化成功')
     } catch (error) {
       console.error('插件管理器初始化失败:', error)
       throw error
+    }
+  }
+
+  /**
+   * 保存插件状态到sessionStorage
+   */
+  function savePluginStates(): void {
+    if (!pluginManager.value) return
+    
+    const states = {
+      plugins: pluginManager.value.getPlugins().map(plugin => ({
+        id: plugin.metadata.id,
+        isInstalled: plugin.isInstalled(),
+        isActivated: plugin.isActivated(),
+        state: plugin.state.state
+      })),
+      timestamp: Date.now()
+    }
+    
+    sessionStorage.setItem('sugar-plugin-states', JSON.stringify(states))
+  }
+
+  /**
+   * 从sessionStorage恢复插件状态
+   */
+  async function restorePluginStates(): Promise<void> {
+    const savedStates = sessionStorage.getItem('sugar-plugin-states')
+    if (!savedStates || !pluginManager.value) return
+    
+    try {
+      const states = JSON.parse(savedStates)
+      // 检查状态是否过期（超过1小时）
+      if (Date.now() - states.timestamp > 3600000) {
+        sessionStorage.removeItem('sugar-plugin-states')
+        return
+      }
+      
+      console.log('恢复插件状态:', states.plugins)
+    } catch (error) {
+      console.error('恢复插件状态失败:', error)
+      sessionStorage.removeItem('sugar-plugin-states')
     }
   }
 
@@ -66,15 +110,31 @@ export function usePluginManager() {
     }
 
     try {
-      // 注册Univer核心插件
-      await pluginManager.value.register(univerCorePlugin)
-      await pluginManager.value.install('univer-core')
-      await pluginManager.value.activate('univer-core')
+      // 检查并注册Univer核心插件
+      if (!pluginManager.value.getPlugin('univer-core')) {
+        await pluginManager.value.register(univerCorePlugin)
+      }
+      
+      // 确保插件已安装和激活
+      if (!pluginManager.value.isInstalled('univer-core')) {
+        await pluginManager.value.install('univer-core')
+      }
+      if (!pluginManager.value.isActivated('univer-core')) {
+        await pluginManager.value.activate('univer-core')
+      }
 
-      // 注册自定义公式插件
-      await pluginManager.value.register(customFormulasPlugin)
-      await pluginManager.value.install('custom-formulas')
-      await pluginManager.value.activate('custom-formulas')
+      // 检查并注册自定义公式插件
+      if (!pluginManager.value.getPlugin('custom-formulas')) {
+        await pluginManager.value.register(customFormulasPlugin)
+      }
+      
+      // 确保插件已安装和激活
+      if (!pluginManager.value.isInstalled('custom-formulas')) {
+        await pluginManager.value.install('custom-formulas')
+      }
+      if (!pluginManager.value.isActivated('custom-formulas')) {
+        await pluginManager.value.activate('custom-formulas')
+      }
 
       console.log('核心插件注册完成')
     } catch (error) {
@@ -142,6 +202,9 @@ export function usePluginManager() {
         }
       }
     }
+    
+    // 保存插件状态
+    savePluginStates()
   }
 
   /**
@@ -169,6 +232,8 @@ export function usePluginManager() {
     activatePlugin,
     deactivatePlugin,
     deactivateAllPlugins,
-    getEventBus
+    getEventBus,
+    savePluginStates,
+    restorePluginStates
   }
 }

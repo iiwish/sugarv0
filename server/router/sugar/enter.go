@@ -12,6 +12,7 @@ type RouterGroup struct {
 	SugarRowLevelOverridesRouter
 	SugarExecutionLogsRouter
 	SugarWorkspacesRouter
+	SugarFormulaQueryRouter
 }
 
 var (
@@ -24,4 +25,5 @@ var (
 	sugarRowLevelOverridesApi = api.ApiGroupApp.SugarApiGroup.SugarRowLevelOverridesApi
 	sugarExecutionLogsApi     = api.ApiGroupApp.SugarApiGroup.SugarExecutionLogsApi
 	sugarWorkspacesApi        = api.ApiGroupApp.SugarApiGroup.SugarWorkspacesApi
+	sugarFormulaQueryApi      = api.ApiGroupApp.SugarApiGroup.SugarFormulaQueryApi
 )

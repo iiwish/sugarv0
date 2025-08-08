@@ -10,10 +10,20 @@
 <script setup lang="ts">
 import { useApp } from '@/composables/useApp'
 
+// 定义组件名称，用于keep-alive
+defineOptions({
+  name: 'SugarApp'
+})
+
 // useApp 组合式函数封装了所有初始化和清理逻辑。
 // 它会在 onMounted 时自动运行，并在 onBeforeUnmount 时自动关闭。
-// 这使得视图组件保持了极度的简洁，只负责渲染 UI。
-useApp()
+// 现在还支持 onActivated 和 onDeactivated 来处理keep-alive的状态切换。
+const app = useApp()
+
+// 暴露应用状态供调试使用
+defineExpose({
+  app
+})
 </script>
 
 <style scoped>

@@ -107,9 +107,13 @@ export const useWorkbookStore = defineStore('workbook', {
     /**
      * 设置当前工作簿
      */
-    setCurrentWorkbook(workbook: WorkbookData) {
+    setCurrentWorkbook(workbook: WorkbookData | null) {
       this.currentWorkbook = workbook
-      this.workbookState.activeSheetId = workbook.sheetOrder[0] || null
+      if (workbook && workbook.sheetOrder && workbook.sheetOrder.length > 0) {
+        this.workbookState.activeSheetId = workbook.sheetOrder[0]
+      } else {
+        this.workbookState.activeSheetId = null
+      }
       this.workbookState.isDirty = false
       this.clearHistory()
     },

@@ -136,13 +136,15 @@ export class PluginManager implements IPluginManager {
       throw new Error(`插件 ${pluginId} 未注册`)
     }
 
-    if (!plugin.isInstalled()) {
-      throw new Error(`插件 ${pluginId} 未安装，无法激活`)
-    }
-
     if (plugin.isActivated()) {
       console.warn(`插件 ${pluginId} 已经激活`)
       return
+    }
+
+    // 如果插件未安装，先安装
+    if (!plugin.isInstalled()) {
+      console.log(`插件 ${pluginId} 未安装，正在自动安装...`)
+      await this.install(pluginId)
     }
 
     try {

@@ -45,7 +45,7 @@
   "/src/view/login/index.vue": "Login",
   "/src/view/person/person.vue": "Person",
   "/src/view/routerHolder.vue": "RouterHolder",
-  "/src/view/sugar/index.vue": "Index",
+  "/src/view/sugar/index.vue": "SugarApp",
   "/src/view/sugar/sugarAgents/sugarAgents.vue": "SugarAgents",
   "/src/view/sugar/sugarCityPermissions/sugarCityPermissions.vue": "SugarCityPermissions",
   "/src/view/sugar/sugarDbConnections/sugarDbConnections.vue": "SugarDbConnections",

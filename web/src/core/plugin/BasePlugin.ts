@@ -112,7 +112,8 @@ export abstract class BasePlugin implements IPlugin {
       // 执行停用后钩子
       await this.executeHook(PluginHookType.AFTER_DEACTIVATE, context)
 
-      this.setState(LifecycleState.STOPPED)
+      // 停用后回到已安装状态，而不是停止状态
+      this.setState(LifecycleState.INITIALIZED)
       this.state.stopTime = Date.now()
     } catch (error) {
       this.setState(LifecycleState.STARTED, error as Error)
