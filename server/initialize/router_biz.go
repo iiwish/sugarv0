@@ -25,5 +25,6 @@ func initBizRouter(routers ...*gin.RouterGroup) {
 		sugarRouter.InitSugarExecutionLogsRouter(privateGroup, publicGroup)
 		sugarRouter.InitSugarWorkspacesRouter(privateGroup, publicGroup)
 		sugarRouter.InitSugarFormulaQueryRouter(privateGroup, publicGroup) // Sugar公式查询路由
+		sugarRouter.InitSugarFoldersRouter(privateGroup, publicGroup)      // Sugar文件夹管理路由
 	}
 }

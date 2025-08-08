@@ -13,6 +13,7 @@ type RouterGroup struct {
 	SugarExecutionLogsRouter
 	SugarWorkspacesRouter
 	SugarFormulaQueryRouter
+	SugarFoldersRouter
 }
 
 var (
@@ -26,4 +27,5 @@ var (
 	sugarExecutionLogsApi     = api.ApiGroupApp.SugarApiGroup.SugarExecutionLogsApi
 	sugarWorkspacesApi        = api.ApiGroupApp.SugarApiGroup.SugarWorkspacesApi
 	sugarFormulaQueryApi      = api.ApiGroupApp.SugarApiGroup.SugarFormulaQueryApi
+	sugarFoldersApi           = api.ApiGroupApp.SugarApiGroup.SugarFoldersApi
 )

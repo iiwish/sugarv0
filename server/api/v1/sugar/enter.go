@@ -13,6 +13,7 @@ type ApiGroup struct {
 	SugarExecutionLogsApi
 	SugarWorkspacesApi
 	SugarFormulaQueryApi
+	SugarFoldersApi
 }
 
 var (
@@ -26,4 +27,5 @@ var (
 	sugarExecutionLogsService     = service.ServiceGroupApp.SugarServiceGroup.SugarExecutionLogsService
 	sugarWorkspacesService        = service.ServiceGroupApp.SugarServiceGroup.SugarWorkspacesService
 	sugarFormulaQueryService      = service.ServiceGroupApp.SugarServiceGroup.SugarFormulaQueryService
+	sugarFoldersService           = service.ServiceGroupApp.SugarServiceGroup.SugarFoldersService
 )
