@@ -1,5 +1,5 @@
 <template>
-  <div class="sugar-app-container">
+  <div ref="containerRef" class="sugar-app-container">
     <!-- 未来在这里集成布局组件，例如侧边栏、标题栏等 -->
     <main class="main-content">
       <div id="univer-sheet-container" class="univer-container"></div>
@@ -8,11 +8,30 @@
 </template>
 
 <script setup lang="ts">
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useApp } from '@/composables/useApp'
 
 // 定义组件名称，用于keep-alive
 defineOptions({
   name: 'SugarApp'
+})
+
+const containerRef = ref<HTMLDivElement | null>(null)
+
+const updateHeight = () => {
+  if (containerRef.value) {
+    const top = containerRef.value.offsetTop
+    containerRef.value.style.height = `calc(100vh - ${top}px - 60px)`
+  }
+}
+
+onMounted(() => {
+  updateHeight()
+  window.addEventListener('resize', updateHeight)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateHeight)
 })
 
 // useApp 组合式函数封装了所有初始化和清理逻辑。
@@ -28,8 +47,8 @@ defineExpose({
 
 <style scoped>
 .sugar-app-container {
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  /* height is now set dynamically */
   display: flex;
   flex-direction: column;
 }
@@ -38,11 +57,11 @@ defineExpose({
   flex: 1;
   display: flex;
   overflow: hidden;
+  padding: 8px;
 }
 
 .univer-container {
   flex: 1;
-  margin: 8px;
   border-radius: 8px;
   background-color: white;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
