@@ -1,6 +1,7 @@
 package sugar
 
 import (
+	"encoding/json"
 	"strconv"
 
 	"github.com/flipped-aurora/gin-vue-admin/server/global"
@@ -178,4 +179,146 @@ func (sugarWorkspacesApi *SugarWorkspacesApi) GetSugarWorkspacesList(c *gin.Cont
 		Page:     pageInfo.Page,
 		PageSize: pageInfo.PageSize,
 	}, "获取成功", c)
+}
+
+// CreateWorkbookFile 创建新的工作簿文件
+// @Tags SugarWorkspaces
+// @Summary 创建新的工作簿文件
+// @Security ApiKeyAuth
+// @Accept application/json
+// @Produce application/json
+// @Param data body object true "创建工作簿文件数据"
+// @Success 200 {object} response.Response{data=sugar.SugarWorkspaces,msg=string} "创建成功"
+// @Router /sugarWorkspaces/createWorkbookFile [post]
+func (sugarWorkspacesApi *SugarWorkspacesApi) CreateWorkbookFile(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req struct {
+		Name     string  `json:"name" binding:"required"`
+		ParentId *string `json:"parentId"`
+		TeamId   string  `json:"teamId" binding:"required"`
+		Content  any     `json:"content"`
+	}
+
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
+		response.FailWithMessage(err.Error(), c)
+		return
+	}
+
+	userId := utils.GetUserID(c)
+	userIdStr := strconv.Itoa(int(userId))
+
+	// 如果没有提供内容，使用默认的工作簿数据
+	var defaultContent any
+	if req.Content != nil {
+		defaultContent = req.Content
+	} else {
+		defaultContent = map[string]interface{}{
+			"id":         "",
+			"sheetOrder": []string{"sheet-001"},
+			"name":       req.Name,
+			"appVersion": "0.1.0",
+			"locale":     "zh-CN",
+			"styles":     map[string]interface{}{},
+			"sheets": map[string]interface{}{
+				"sheet-001": map[string]interface{}{
+					"id":   "sheet-001",
+					"name": "Sheet1",
+					"cellData": map[string]interface{}{
+						"0": map[string]interface{}{
+							"0": map[string]interface{}{"v": "新建表格"},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	// 转换为JSON
+	contentBytes, err := json.Marshal(defaultContent)
+	if err != nil {
+		response.FailWithMessage("内容格式错误", c)
+		return
+	}
+
+	workspace, err := sugarWorkspacesService.CreateWorkbookFile(ctx, req.Name, req.ParentId, req.TeamId, userIdStr, contentBytes)
+	if err != nil {
+		global.GVA_LOG.Error("创建工作簿文件失败!", zap.Error(err))
+		response.FailWithMessage("创建失败:"+err.Error(), c)
+		return
+	}
+
+	response.OkWithData(workspace, c)
+}
+
+// SaveWorkbookContent 保存工作簿内容
+// @Tags SugarWorkspaces
+// @Summary 保存工作簿内容
+// @Security ApiKeyAuth
+// @Accept application/json
+// @Produce application/json
+// @Param data body object true "保存工作簿内容数据"
+// @Success 200 {object} response.Response{msg=string} "保存成功"
+// @Router /sugarWorkspaces/saveWorkbookContent [put]
+func (sugarWorkspacesApi *SugarWorkspacesApi) SaveWorkbookContent(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req struct {
+		Id      string `json:"id" binding:"required"`
+		Content any    `json:"content" binding:"required"`
+	}
+
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
+		response.FailWithMessage(err.Error(), c)
+		return
+	}
+
+	userId := utils.GetUserID(c)
+	userIdStr := strconv.Itoa(int(userId))
+
+	// 转换为JSON
+	contentBytes, err := json.Marshal(req.Content)
+	if err != nil {
+		response.FailWithMessage("内容格式错误", c)
+		return
+	}
+
+	err = sugarWorkspacesService.SaveWorkbookContent(ctx, req.Id, contentBytes, userIdStr)
+	if err != nil {
+		global.GVA_LOG.Error("保存工作簿内容失败!", zap.Error(err))
+		response.FailWithMessage("保存失败:"+err.Error(), c)
+		return
+	}
+
+	response.OkWithMessage("保存成功", c)
+}
+
+// GetWorkbookContent 获取工作簿内容
+// @Tags SugarWorkspaces
+// @Summary 获取工作簿内容
+// @Security ApiKeyAuth
+// @Accept application/json
+// @Produce application/json
+// @Param id query string true "文件ID"
+// @Success 200 {object} response.Response{data=object,msg=string} "获取成功"
+// @Router /sugarWorkspaces/getWorkbookContent [get]
+func (sugarWorkspacesApi *SugarWorkspacesApi) GetWorkbookContent(c *gin.Context) {
+	ctx := c.Request.Context()
+	id := c.Query("id")
+	if id == "" {
+		response.FailWithMessage("文件ID不能为空", c)
+		return
+	}
+
+	userId := utils.GetUserID(c)
+	userIdStr := strconv.Itoa(int(userId))
+
+	content, err := sugarWorkspacesService.GetWorkbookContent(ctx, id, userIdStr)
+	if err != nil {
+		global.GVA_LOG.Error("获取工作簿内容失败!", zap.Error(err))
+		response.FailWithMessage("获取失败:"+err.Error(), c)
+		return
+	}
+
+	response.OkWithData(content, c)
 }

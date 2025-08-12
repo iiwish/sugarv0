@@ -9,7 +9,7 @@ import type {
 // 导入公式定义
 import { financialFormulas } from './formulas/financial'
 import { aiFormulas } from './formulas/ai'
-import { dbFormulas } from './formulas/db'
+import { dbFormulas, forceRefreshDatabaseFormulas } from './formulas/db'
 
 /**
  * 自定义公式插件
@@ -246,9 +246,9 @@ export class CustomFormulasPlugin extends BasePlugin {
    * 动态注册单个公式
    */
   async registerFormula(
-    name: string, 
-    implementation: Function, 
-    config: any, 
+    name: string,
+    implementation: Function,
+    config: any,
     category: string = 'custom'
   ): Promise<void> {
     if (!this.univerAPI) {
@@ -282,6 +282,129 @@ export class CustomFormulasPlugin extends BasePlugin {
       this.context?.logger.error(`动态注册公式 ${name} 失败:`, error)
       throw error
     }
+  }
+
+  /**
+   * 刷新所有数据库公式
+   * 通过强制重新计算来更新公式结果
+   */
+  async refreshDatabaseFormulas(): Promise<{ success: number; failed: number; errors: string[] }> {
+    if (!this.univerAPI) {
+      throw new Error('Univer API未初始化')
+    }
+
+    const result = {
+      success: 0,
+      failed: 0,
+      errors: [] as string[]
+    }
+
+    try {
+      this.context?.logger.info('开始刷新数据库公式...')
+
+      // 步骤1: 清空数据库公式缓存
+      try {
+        forceRefreshDatabaseFormulas()
+        result.success++
+        this.context?.logger.info('数据库公式缓存已清空')
+      } catch (error) {
+        result.failed++
+        const errorMsg = `清空缓存失败: ${error}`
+        result.errors.push(errorMsg)
+        this.context?.logger.warn(errorMsg)
+      }
+
+      // 步骤2: 尝试通过公式引擎进行全局重新计算
+      const formulaEngine = this.univerAPI.getFormula()
+      if (formulaEngine) {
+        try {
+          // 尝试多种重新计算方法
+          if (formulaEngine.calculate) {
+            formulaEngine.calculate()
+            result.success++
+            this.context?.logger.info('通过公式引擎重新计算成功')
+          } else if (formulaEngine.recalculate) {
+            formulaEngine.recalculate()
+            result.success++
+            this.context?.logger.info('通过公式引擎重新计算成功')
+          } else if (formulaEngine.refresh) {
+            formulaEngine.refresh()
+            result.success++
+            this.context?.logger.info('通过公式引擎刷新成功')
+          } else {
+            this.context?.logger.warn('公式引擎没有可用的重新计算方法')
+          }
+        } catch (error) {
+          result.failed++
+          const errorMsg = `公式引擎重新计算失败: ${error}`
+          result.errors.push(errorMsg)
+          this.context?.logger.warn(errorMsg)
+        }
+      }
+
+      // 步骤3: 尝试通过事件总线触发全局重新计算
+      try {
+        this.context?.eventBus.emit('formulas:refresh-requested', {
+          type: 'formulas:refresh-requested',
+          payload: { source: 'custom-formulas-plugin' },
+          timestamp: Date.now()
+        })
+        result.success++
+        this.context?.logger.info('通过事件总线触发重新计算')
+      } catch (error) {
+        result.failed++
+        const errorMsg = `事件总线触发失败: ${error}`
+        result.errors.push(errorMsg)
+        this.context?.logger.warn(errorMsg)
+      }
+
+      // 步骤4: 尝试通过univerAPI的其他重新计算方法
+      try {
+        if (this.univerAPI.recalculate) {
+          this.univerAPI.recalculate()
+          result.success++
+          this.context?.logger.info('通过univerAPI重新计算成功')
+        } else if (this.univerAPI.calculate) {
+          this.univerAPI.calculate()
+          result.success++
+          this.context?.logger.info('通过univerAPI计算成功')
+        }
+      } catch (error) {
+        result.failed++
+        const errorMsg = `univerAPI重新计算失败: ${error}`
+        result.errors.push(errorMsg)
+        this.context?.logger.warn(errorMsg)
+      }
+
+      this.context?.logger.info(`数据库公式刷新完成: 成功 ${result.success}, 失败 ${result.failed}`)
+      return result
+
+    } catch (error) {
+      result.failed++
+      const errorMsg = `刷新数据库公式时发生错误: ${error}`
+      result.errors.push(errorMsg)
+      this.context?.logger.error(errorMsg)
+      return result
+    }
+  }
+
+  /**
+   * 获取数据库公式的统计信息
+   */
+  getDatabaseFormulaStats(): { total: number; byType: Record<string, number> } {
+    const dbFormulas = Array.from(this.registeredFormulas.entries())
+      .filter(([name, info]) => info.category === 'db')
+    
+    const stats = {
+      total: dbFormulas.length,
+      byType: {} as Record<string, number>
+    }
+
+    dbFormulas.forEach(([name]) => {
+      stats.byType[name] = (stats.byType[name] || 0) + 1
+    })
+
+    return stats
   }
 }
 

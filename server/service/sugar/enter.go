@@ -11,5 +11,6 @@ type ServiceGroup struct {
 	SugarExecutionLogsService
 	SugarWorkspacesService
 	SugarFormulaQueryService
+	SugarFormulaAiService
 	SugarFoldersService
 }

@@ -1,0 +1,62 @@
+# 多MCP服务器配置示例
+llm:
+  # OpenAI兼容接口配置
+  openai:
+    base-url: https://bella-openapi.ke.com/v1
+    token: "684e7206-f906-44d7-99a2-3ce593766887"
+    model-name: qwen3-235b-a22b-instruct-2507
+  
+  # MCP配置 - 支持多个MCP服务器
+  mcp:
+    # 默认MCP服务器配置
+    default-server: GVA_MCP
+    servers:
+      # 主要的语义数据服务器
+      GVA_MCP:
+        model-name: qwen3-235b-a22b-instruct-2507
+        server-name: GVA_MCP
+        description: "主要的语义数据获取服务器"
+        tools: ["semantic_data_fetcher", "current_time", "get_nickname"]
+      
+      # 未来可能的其他MCP服务器
+      ANALYTICS_MCP:
+        model-name: qwen3-235b-a22b-instruct-2507
+        server-name: ANALYTICS_MCP
+        description: "数据分析专用MCP服务器"
+        tools: ["data_analyzer", "chart_generator"]
+      
+      EXTERNAL_API_MCP:
+        model-name: gpt-4
+        server-name: EXTERNAL_API_MCP
+        description: "外部API集成MCP服务器"
+        tools: ["weather_api", "stock_api", "news_api"]
+  
+  # HTTP请求配置
+  http:
+    timeout-seconds: 60
+
+# MCP服务器注册配置
+mcp:
+  # 当前活跃的MCP服务器列表
+  servers:
+    - name: GVA_MCP
+      version: v1.0.0
+      sse_path: /sse
+      message_path: /message
+      url_prefix: ""
+      port: 8888  # 与主服务器共享端口
+    
+    # 未来的其他MCP服务器
+    # - name: ANALYTICS_MCP
+    #   version: v1.0.0
+    #   sse_path: /analytics-sse
+    #   message_path: /analytics-message
+    #   url_prefix: "/analytics"
+    #   port: 8889
+    
+    # - name: EXTERNAL_API_MCP
+    #   version: v1.0.0
+    #   sse_path: /external-sse
+    #   message_path: /external-message
+    #   url_prefix: "/external"
+    #   port: 8890

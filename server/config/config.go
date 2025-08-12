@@ -37,4 +37,7 @@ type Server struct {
 
 	// MCP配置
 	MCP MCP `mapstructure:"mcp" json:"mcp" yaml:"mcp"`
+
+	// LLM配置
+	LLM LLM `mapstructure:"llm" json:"llm" yaml:"llm"`
 }

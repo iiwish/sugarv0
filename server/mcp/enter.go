@@ -2,6 +2,8 @@ package mcpTool
 
 import (
 	"context"
+	"fmt"
+
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -28,4 +30,13 @@ func RegisterAllTools(mcpServer *server.MCPServer) {
 	for _, tool := range toolRegister {
 		mcpServer.AddTool(tool.New(), tool.Handle)
 	}
+}
+
+// InvokeTool 通过内存直接调用已注册的工具
+func InvokeTool(ctx context.Context, toolName string, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	tool, ok := toolRegister[toolName]
+	if !ok {
+		return nil, fmt.Errorf("MCP工具 '%s' 未注册", toolName)
+	}
+	return tool.Handle(ctx, request)
 }

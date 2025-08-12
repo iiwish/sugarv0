@@ -78,7 +78,35 @@
     *   这种设计通过统一的**插件管理器**、**事件总线**和 **Pinia 状态管理**实现，保证了核心系统的整洁和高度可扩展性。
 *   **自定义公式**: 项目展示了扩展 Univer 公式系统的能力。在 [`web/src/view/sugar/index.vue`](web/src/view/sugar/index.vue:16) 中，一个名为 `LMDI` 的自定义金融公式被成功注册和使用，验证了公式系统的扩展性。
 
-## 5. 如何理解和贡献
+## 5. 架构决策与最佳实践 (Architecture Decisions & Best Practices)
+
+### 5.1. AI Function 与 MCP (Model-Context-Protocol) 的实现模式
+
+项目中存在一类特殊的AI函数（如`AIFETCH`），它们需要通过大语言模型（LLM）的自然语言理解能力来调用内部的数据查询服务（如 `SUGAR.GET`）。这种模式被称为"AI Function"或"Tool Calling"。
+
+为了实现这一功能，我们采用了 **OpenAI Function Calling** 规范，并遵循以下架构原则以避免循环依赖和过度设计：
+
+1.  **职责分离 (Separation of Concerns)**:
+    *   **`service/system` 层**: `sys_llm_service.go` 的职责是且仅是与一个遵循 OpenAI 兼容规范的 HTTP 端点进行通信。它负责序列化请求、发送HTTP调用、处理鉴权以及反序列化响应。它**不应该**包含任何业务逻辑或对其他内部服务的直接了解。
+    *   **`mcp` 层**: `mcp`包（如 [`mcp/semantic_data_fetcher.go`](server/mcp/semantic_data_fetcher.go)）的职责是且仅是为LLM**定义**可用的工具（Function Schema）。它提供工具的名称、描述和参数结构。它**不应该**包含任何实现逻辑，也**严禁**导入任何 `service` 包，以防止循环依赖。
+    *   **`service/sugar` 层**: 像 [`sugar_formula_ai_service.go`](server/service/sugar/sugar_formula_ai_service.go) 这样的业务核心服务，负责编排整个AI Function的调用流程。
+
+2.  **执行流程 (Execution Flow)**:
+    *   **发起**: `sugar_formula_ai_service` 接收到 `AIFETCH` 请求。
+    *   **定义工具**: 它从 `mcp` 包获取工具的定义（Schema），并将其与用户的自然语言查询一起传递给 `sys_llm_service`。
+    *   **LLM调用**: `sys_llm_service` 将请求发送给外部的 LLM。
+    *   **工具调用指令**: LLM 理解用户意图，并返回一个要求调用 `semantic_data_fetcher` 工具的JSON响应。
+    *   **解析与执行**: `sugar_formula_ai_service` 的 `processAiFetchResponse` 函数接收到这个JSON响应，解析出工具名称和参数。
+    *   **内部调用**: `processAiFetchResponse` **在服务层内部**直接调用 `SugarFormulaQueryService` 来执行真正的数据查询。
+    *   **返回结果**: 将查询结果格式化后返回给用户。
+
+3.  **核心原则**:
+    *   **避免同进程网络调用**: 严禁在同一进程内部通过 `http` 或 `sse` 协议进行服务间调用（例如，从一个 service 调用同一应用内的另一个 service 的API端点）。这种做法不仅效率低下，还会引入不必要的认证复杂性。
+    *   **避免循环依赖**: `mcp` 包是定义层，`service` 包是实现层。实现层可以依赖定义层，但反之则不行。这是保证项目可维护性的关键。
+
+通过遵循上述模式，我们保证了系统的解耦、可测试性和逻辑清晰性。
+
+## 6. 如何理解和贡献
 
 *   **从数据库开始**: 理解项目的最佳起点是 [`docs/Sugar表结构设计.sql`](docs/Sugar表结构设计.sql)。该文件清晰地定义了项目的核心实体和它们之间的关系。
 *   **后端先行**: 后端逻辑相对直接，可以从 `server/router/sugar/` 入手，跟踪一个 API 请求从路由、API 处理函数、服务层到数据模型的完整流程。

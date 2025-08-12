@@ -108,3 +108,51 @@ export const getSugarWorkspacesPublic = () => {
     method: 'get',
   })
 }
+
+// @Tags SugarWorkspaces
+// @Summary 创建新的工作簿文件
+// @Security ApiKeyAuth
+// @Accept application/json
+// @Produce application/json
+// @Param data body object true "创建工作簿文件数据"
+// @Success 200 {object} response.Response{data=object,msg=string} "创建成功"
+// @Router /sugarWorkspaces/createWorkbookFile [post]
+export const createWorkbookFile = (data) => {
+  return service({
+    url: '/sugarWorkspaces/createWorkbookFile',
+    method: 'post',
+    data
+  })
+}
+
+// @Tags SugarWorkspaces
+// @Summary 保存工作簿内容
+// @Security ApiKeyAuth
+// @Accept application/json
+// @Produce application/json
+// @Param data body object true "保存工作簿内容数据"
+// @Success 200 {object} response.Response{msg=string} "保存成功"
+// @Router /sugarWorkspaces/saveWorkbookContent [put]
+export const saveWorkbookContent = (data) => {
+  return service({
+    url: '/sugarWorkspaces/saveWorkbookContent',
+    method: 'put',
+    data
+  })
+}
+
+// @Tags SugarWorkspaces
+// @Summary 获取工作簿内容
+// @Security ApiKeyAuth
+// @Accept application/json
+// @Produce application/json
+// @Param id query string true "文件ID"
+// @Success 200 {object} response.Response{data=object,msg=string} "获取成功"
+// @Router /sugarWorkspaces/getWorkbookContent [get]
+export const getWorkbookContent = (params) => {
+  return service({
+    url: '/sugarWorkspaces/getWorkbookContent',
+    method: 'get',
+    params
+  })
+}

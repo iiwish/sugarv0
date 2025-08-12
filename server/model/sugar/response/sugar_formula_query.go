@@ -9,6 +9,7 @@ type SugarFormulaCalcResponse struct {
 // SugarFormulaGetResponse SUGAR.GET 公式响应结构
 type SugarFormulaGetResponse struct {
 	Results []map[string]interface{} `json:"results"` // 查询结果列表
+	Columns []string                 `json:"columns"` // 列信息
 	Count   int                      `json:"count"`   // 结果数量
 	Error   string                   `json:"error"`   // 错误信息
 }
@@ -30,9 +31,10 @@ func NewCalcErrorResponse(error string) *SugarFormulaCalcResponse {
 }
 
 // NewGetSuccessResponse 创建成功的查询响应
-func NewGetSuccessResponse(results []map[string]interface{}) *SugarFormulaGetResponse {
+func NewGetSuccessResponse(results []map[string]interface{}, columns []string) *SugarFormulaGetResponse {
 	return &SugarFormulaGetResponse{
 		Results: results,
+		Columns: columns,
 		Count:   len(results),
 		Error:   "",
 	}

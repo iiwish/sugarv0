@@ -50,6 +50,9 @@ export class UniverCorePlugin extends BasePlugin {
     
     // 监听工作簿数据变化
     context.eventBus.on('workbook:data-changed', this.handleWorkbookDataChanged.bind(this))
+    
+    // 监听获取当前工作簿请求
+    context.eventBus.on('workbook:get-current', this.handleGetCurrentWorkbook.bind(this))
   }
 
   async onActivate(context: PluginContext): Promise<void> {
@@ -66,6 +69,7 @@ export class UniverCorePlugin extends BasePlugin {
     await this.dispose()
     this.context?.eventBus.off('univer:container-ready', this.handleContainerReady.bind(this))
     this.context?.eventBus.off('workbook:data-changed', this.handleWorkbookDataChanged.bind(this))
+    this.context?.eventBus.off('workbook:get-current', this.handleGetCurrentWorkbook.bind(this))
   }
 
   /**
@@ -261,6 +265,25 @@ export class UniverCorePlugin extends BasePlugin {
   private handleWorkbookDataChanged(event: any): void {
     // 可以在这里处理工作簿数据变化的逻辑
     this.context?.logger.debug('工作簿数据已变化:', event.payload)
+  }
+
+  /**
+   * 处理获取当前工作簿请求
+   */
+  private handleGetCurrentWorkbook(event: any): void {
+    this.context?.logger.debug('收到获取当前工作簿请求:', event.payload)
+    
+    // 响应当前工作簿
+    const responseEvent = {
+      type: 'workbook:current-response',
+      payload: {
+        requestId: event.payload?.requestId,
+        workbook: this.workbook
+      },
+      timestamp: Date.now()
+    }
+    
+    this.context?.eventBus.emit('workbook:current-response', responseEvent)
   }
 
   /**

@@ -27,5 +27,6 @@ var (
 	sugarExecutionLogsService     = service.ServiceGroupApp.SugarServiceGroup.SugarExecutionLogsService
 	sugarWorkspacesService        = service.ServiceGroupApp.SugarServiceGroup.SugarWorkspacesService
 	sugarFormulaQueryService      = service.ServiceGroupApp.SugarServiceGroup.SugarFormulaQueryService
+	sugarFormulaAiService         = service.ServiceGroupApp.SugarServiceGroup.SugarFormulaAiService
 	sugarFoldersService           = service.ServiceGroupApp.SugarServiceGroup.SugarFoldersService
 )

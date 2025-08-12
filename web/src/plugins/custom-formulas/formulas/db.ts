@@ -6,6 +6,7 @@ import {
   NumberValueObject,
   StringValueObject,
 } from '@univerjs/preset-sheets-core'
+import { useUserStore } from '@/pinia/modules/user'
 
 /**
  * 向下填充配置接口
@@ -106,10 +107,13 @@ export class SugarCalcFunction extends BaseFunction {
       xhr.open('POST', '/api/sugarFormulaQuery/executeCalc', false) // 同步请求
       xhr.setRequestHeader('Content-Type', 'application/json')
       
-      // 添加认证头（如果需要）
-      const token = localStorage.getItem('token') || sessionStorage.getItem('token')
-      if (token) {
-        xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+      // 添加认证头
+      const userStore = useUserStore()
+      if (userStore.token) {
+        xhr.setRequestHeader('x-token', userStore.token)
+      }
+      if ((userStore.userInfo as any).ID) {
+        xhr.setRequestHeader('x-user-id', (userStore.userInfo as any).ID)
       }
 
       xhr.send(JSON.stringify(requestData))
@@ -144,8 +148,31 @@ export class SugarCalcFunction extends BaseFunction {
   private getValue(valueObject: BaseValueObject): any {
     if (valueObject.isArray()) {
       const array = valueObject as ArrayValueObject
-      const flatArray = array.getArrayValue().flat()
-      return flatArray.length > 0 ? flatArray[0] : ''
+      const arrayValue = array.getArrayValue()
+      
+      // 递归函数来深度展平嵌套数组并提取第一个有效值
+      const extractFirstValue = (arr: any): any => {
+        if (!Array.isArray(arr) || arr.length === 0) {
+          return ''
+        }
+        
+        const firstItem = arr[0]
+        
+        // 如果第一个元素还是数组，继续递归
+        if (Array.isArray(firstItem)) {
+          return extractFirstValue(firstItem)
+        }
+        
+        // 如果是 BaseValueObject，获取其值
+        if (firstItem && typeof firstItem === 'object' && 'getValue' in firstItem) {
+          return firstItem.getValue()
+        }
+        
+        // 否则直接返回值
+        return firstItem !== null && firstItem !== undefined ? firstItem : ''
+      }
+      
+      return extractFirstValue(arrayValue)
     }
     return valueObject.getValue()
   }
@@ -241,10 +268,13 @@ export class SugarGetFunction extends BaseFunction {
       xhr.open('POST', '/api/sugarFormulaQuery/executeGet', false) // 同步请求
       xhr.setRequestHeader('Content-Type', 'application/json')
       
-      // 添加认证头（如果需要）
-      const token = localStorage.getItem('token') || sessionStorage.getItem('token')
-      if (token) {
-        xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+      // 添加认证头
+      const userStore = useUserStore()
+      if (userStore.token) {
+        xhr.setRequestHeader('x-token', userStore.token)
+      }
+      if ((userStore.userInfo as any).ID) {
+        xhr.setRequestHeader('x-user-id', (userStore.userInfo as any).ID)
       }
 
       xhr.send(JSON.stringify(requestData))
@@ -342,8 +372,31 @@ export class SugarGetFunction extends BaseFunction {
   private getValue(valueObject: BaseValueObject): any {
     if (valueObject.isArray()) {
       const array = valueObject as ArrayValueObject
-      const flatArray = array.getArrayValue().flat()
-      return flatArray.length > 0 ? flatArray[0] : ''
+      const arrayValue = array.getArrayValue()
+      
+      // 递归函数来深度展平嵌套数组并提取第一个有效值
+      const extractFirstValue = (arr: any): any => {
+        if (!Array.isArray(arr) || arr.length === 0) {
+          return ''
+        }
+        
+        const firstItem = arr[0]
+        
+        // 如果第一个元素还是数组，继续递归
+        if (Array.isArray(firstItem)) {
+          return extractFirstValue(firstItem)
+        }
+        
+        // 如果是 BaseValueObject，获取其值
+        if (firstItem && typeof firstItem === 'object' && 'getValue' in firstItem) {
+          return firstItem.getValue()
+        }
+        
+        // 否则直接返回值
+        return firstItem !== null && firstItem !== undefined ? firstItem : ''
+      }
+      
+      return extractFirstValue(arrayValue)
     }
     return valueObject.getValue()
   }
@@ -422,6 +475,65 @@ export const functionSugarGetZhCN = {
 }
 
 /**
+ * 公式刷新缓存管理
+ */
+class FormulaRefreshCache {
+  private static instance: FormulaRefreshCache
+  private cache = new Map<string, { timestamp: number; result: any }>()
+  private readonly CACHE_DURATION = 30000 // 30秒缓存
+
+  static getInstance(): FormulaRefreshCache {
+    if (!FormulaRefreshCache.instance) {
+      FormulaRefreshCache.instance = new FormulaRefreshCache()
+    }
+    return FormulaRefreshCache.instance
+  }
+
+  getCacheKey(formulaName: string, params: any[]): string {
+    return `${formulaName}:${JSON.stringify(params)}`
+  }
+
+  get(key: string): any | null {
+    const cached = this.cache.get(key)
+    if (cached && Date.now() - cached.timestamp < this.CACHE_DURATION) {
+      return cached.result
+    }
+    this.cache.delete(key)
+    return null
+  }
+
+  set(key: string, result: any): void {
+    this.cache.set(key, { timestamp: Date.now(), result })
+  }
+
+  clear(): void {
+    this.cache.clear()
+  }
+
+  clearExpired(): void {
+    const now = Date.now()
+    const keysToDelete: string[] = []
+    
+    this.cache.forEach((value, key) => {
+      if (now - value.timestamp >= this.CACHE_DURATION) {
+        keysToDelete.push(key)
+      }
+    })
+    
+    keysToDelete.forEach(key => this.cache.delete(key))
+  }
+}
+
+/**
+ * 强制刷新数据库公式
+ */
+export function forceRefreshDatabaseFormulas(): void {
+  const cache = FormulaRefreshCache.getInstance()
+  cache.clear()
+  console.log('数据库公式缓存已清空，下次调用将重新获取数据')
+}
+
+/**
  * 数据库类公式定义
  */
 export const dbFormulas = [
@@ -462,7 +574,24 @@ export const dbFormulas = [
           // 成对参数格式 "key", "value"
           if (i + 1 < filters.length) {
             const filterKey = currentArg
-            const filterValue = filters[i + 1]
+            let filterValue = filters[i + 1]
+            
+            // 处理嵌套数组的情况（单元格引用）
+            if (Array.isArray(filterValue)) {
+              // 递归展平嵌套数组并提取第一个有效值
+              const extractFirstValue = (arr: any): any => {
+                if (!Array.isArray(arr) || arr.length === 0) {
+                  return ''
+                }
+                const firstItem = arr[0]
+                if (Array.isArray(firstItem)) {
+                  return extractFirstValue(firstItem)
+                }
+                return firstItem !== null && firstItem !== undefined ? firstItem : ''
+              }
+              filterValue = extractFirstValue(filterValue)
+            }
+            
             if (filterKey) {
               filterObj[filterKey] = filterValue
             }
@@ -488,10 +617,13 @@ export const dbFormulas = [
         xhr.open('POST', '/api/sugarFormulaQuery/executeCalc', false) // 同步请求
         xhr.setRequestHeader('Content-Type', 'application/json')
         
-        // 添加认证头（如果需要）
-        const token = localStorage.getItem('token') || sessionStorage.getItem('token')
-        if (token) {
-          xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+        // 添加认证头
+        const userStore = useUserStore()
+        if (userStore.token) {
+          xhr.setRequestHeader('x-token', userStore.token)
+        }
+        if ((userStore.userInfo as any).ID) {
+          xhr.setRequestHeader('x-user-id', (userStore.userInfo as any).ID)
         }
 
         xhr.send(JSON.stringify(requestData))
@@ -595,7 +727,24 @@ export const dbFormulas = [
           // 成对参数格式 "key", "value"
           if (i + 1 < filters.length) {
             const filterKey = currentArg
-            const filterValue = filters[i + 1]
+            let filterValue = filters[i + 1]
+            
+            // 处理嵌套数组的情况（单元格引用）
+            if (Array.isArray(filterValue)) {
+              // 递归展平嵌套数组并提取第一个有效值
+              const extractFirstValue = (arr: any): any => {
+                if (!Array.isArray(arr) || arr.length === 0) {
+                  return ''
+                }
+                const firstItem = arr[0]
+                if (Array.isArray(firstItem)) {
+                  return extractFirstValue(firstItem)
+                }
+                return firstItem !== null && firstItem !== undefined ? firstItem : ''
+              }
+              filterValue = extractFirstValue(filterValue)
+            }
+            
             if (filterKey) {
               filterObj[filterKey] = filterValue
             }
@@ -620,10 +769,13 @@ export const dbFormulas = [
         xhr.open('POST', '/api/sugarFormulaQuery/executeGet', false) // 同步请求
         xhr.setRequestHeader('Content-Type', 'application/json')
         
-        // 添加认证头（如果需要）
-        const token = localStorage.getItem('token') || sessionStorage.getItem('token')
-        if (token) {
-          xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+        // 添加认证头
+        const userStore = useUserStore()
+        if (userStore.token) {
+          xhr.setRequestHeader('x-token', userStore.token)
+        }
+        if ((userStore.userInfo as any).ID) {
+          xhr.setRequestHeader('x-user-id', (userStore.userInfo as any).ID)
         }
 
         xhr.send(JSON.stringify(requestData))

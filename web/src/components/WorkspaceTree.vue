@@ -294,7 +294,7 @@ const props = withDefaults(defineProps<Props>(), {
 // 定义事件
 const emit = defineEmits<{
   nodeClick: [data: WorkspaceTreeNode]
-  fileCreate: [parentId?: string]
+  fileCreate: [data: WorkspaceTreeNode | string | undefined]
   teamChange: [teamId: string]
 }>()
 
@@ -457,28 +457,58 @@ const handleCreateFolder = async () => {
 }
 
 // 创建文件
-const handleCreateFile = () => {
-  // 根据当前选中的节点确定父节点ID
-  let parentId: string | undefined = undefined
-  
-  if (selectedNode.value) {
-    if (selectedNode.value.type === 'folder') {
-      // 如果选中的是文件夹，则在该文件夹下创建
-      parentId = selectedNode.value.id
-    } else if (selectedNode.value.type === 'file') {
-      // 如果选中的是文件，则在该文件的父文件夹下创建
-      parentId = selectedNode.value.parentId
+const handleCreateFile = async () => {
+  try {
+    // 根据当前选中的节点确定父节点ID
+    let parentId: string | undefined = undefined
+    
+    if (selectedNode.value) {
+      if (selectedNode.value.type === 'folder') {
+        // 如果选中的是文件夹，则在该文件夹下创建
+        parentId = selectedNode.value.id
+      } else if (selectedNode.value.type === 'file') {
+        // 如果选中的是文件，则在该文件的父文件夹下创建
+        parentId = selectedNode.value.parentId
+      }
+    } else if (contextMenuData.value) {
+      // 如果是右键菜单触发，使用右键菜单的节点
+      if (contextMenuData.value.type === 'folder') {
+        parentId = contextMenuData.value.id
+      } else {
+        parentId = contextMenuData.value.parentId
+      }
     }
-  } else if (contextMenuData.value) {
-    // 如果是右键菜单触发，使用右键菜单的节点
-    if (contextMenuData.value.type === 'folder') {
-      parentId = contextMenuData.value.id
+    
+    // 生成默认文件名
+    const timestamp = new Date().toLocaleString('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    }).replace(/[\/\s:]/g, '')
+    const defaultName = `新建表格_${timestamp}`
+    
+    // 调用API创建文件
+    const { createWorkbookFile } = await import('@/api/sugar/sugarWorkspaces')
+    const response = await createWorkbookFile({
+      name: defaultName,
+      parentId,
+      teamId: props.selectedTeamId
+    }) as unknown as ApiResponse<WorkspaceTreeNode>
+    
+    if (response?.code === 0) {
+      ElMessage.success('文件创建成功')
+      // 刷新树形数据
+      await loadTreeData()
+      // 触发文件创建事件，传递新创建的文件信息
+      emit('fileCreate', response.data)
     } else {
-      parentId = contextMenuData.value.parentId
+      ElMessage.error(response?.msg || '创建文件失败')
     }
+  } catch (error) {
+    console.error('创建文件失败:', error)
+    ElMessage.error('创建文件失败')
   }
-  
-  emit('fileCreate', parentId)
   contextMenuData.value = null
 }
 

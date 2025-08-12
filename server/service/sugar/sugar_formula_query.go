@@ -112,7 +112,7 @@ func (s *SugarFormulaQueryService) ExecuteGetFormula(ctx context.Context, req *s
 	global.GVA_LOG.Info("GET查询成功",
 		zap.Int("resultCount", len(results)))
 
-	return sugarRes.NewGetSuccessResponse(results), nil
+	return sugarRes.NewGetSuccessResponse(results, req.ReturnColumns), nil
 }
 
 // getSemanticModel 获取语义模型

@@ -12,8 +12,10 @@ func (s *SugarFormulaQueryRouter) InitSugarFormulaQueryRouter(Router *gin.Router
 	sugarFormulaQueryRouter := Router.Group("sugarFormulaQuery").Use(middleware.OperationRecord())
 	sugarFormulaQueryRouterWithoutRecord := Router.Group("sugarFormulaQuery")
 	{
-		sugarFormulaQueryRouter.POST("executeCalc", sugarFormulaQueryApi.ExecuteSugarCalc) // 执行 SUGAR.CALC 公式
-		sugarFormulaQueryRouter.POST("executeGet", sugarFormulaQueryApi.ExecuteSugarGet)   // 执行 SUGAR.GET 公式
+		sugarFormulaQueryRouter.POST("executeCalc", sugarFormulaQueryApi.ExecuteSugarCalc)                // 执行 SUGAR.CALC 公式
+		sugarFormulaQueryRouter.POST("executeGet", sugarFormulaQueryApi.ExecuteSugarGet)                  // 执行 SUGAR.GET 公式
+		sugarFormulaQueryRouter.POST("executeAiFetch", sugarFormulaQueryApi.ExecuteAiFetch)               // 执行 AIFETCH 公式
+		sugarFormulaQueryRouter.POST("executeAiExplainRange", sugarFormulaQueryApi.ExecuteAiExplainRange) // 执行 AIEXPLAINRANGE 公式
 	}
 	{
 		// 如果需要不记录操作日志的接口，可以在这里添加

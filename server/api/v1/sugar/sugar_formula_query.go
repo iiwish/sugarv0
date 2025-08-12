@@ -86,3 +86,77 @@ func (s *SugarFormulaQueryApi) ExecuteSugarGet(c *gin.Context) {
 
 	response.OkWithData(result, c)
 }
+
+// ExecuteAiFetch 执行 AIFETCH 公式
+// @Tags SugarFormulaQuery
+// @Summary 执行 AIFETCH 公式
+// @Security ApiKeyAuth
+// @Accept application/json
+// @Produce application/json
+// @Param data body sugarReq.SugarFormulaAiFetchRequest true "AIFETCH 公式请求"
+// @Success 200 {object} response.Response{data=sugarRes.SugarFormulaAiResponse,msg=string} "执行成功"
+// @Router /sugarFormulaQuery/executeAiFetch [post]
+func (s *SugarFormulaQueryApi) ExecuteAiFetch(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req sugarReq.SugarFormulaAiFetchRequest
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
+		response.FailWithMessage(err.Error(), c)
+		return
+	}
+
+	userId := utils.GetUserID(c)
+	userIdStr := strconv.Itoa(int(userId))
+
+	result, err := sugarFormulaAiService.ExecuteAiFetchFormula(ctx, &req, userIdStr)
+	if err != nil {
+		global.GVA_LOG.Error("AIFETCH 执行失败!", zap.Error(err))
+		response.FailWithMessage("AIFETCH 执行失败: "+err.Error(), c)
+		return
+	}
+
+	// 检查业务层返回的错误
+	if result.Error != "" {
+		response.FailWithMessage(result.Error, c)
+		return
+	}
+
+	response.OkWithData(result, c)
+}
+
+// ExecuteAiExplain 执行 AIEXPLAINRange 公式
+// @Tags SugarFormulaQuery
+// @Summary 执行 AIEXPLAINRange 公式
+// @Security ApiKeyAuth
+// @Accept application/json
+// @Produce application/json
+// @Param data body sugarReq.SugarFormulaAiExplainRequest true "AIEXPLAINRange 公式请求"
+// @Success 200 {object} response.Response{data=sugarRes.SugarFormulaAiResponse,msg=string} "执行成功"
+// @Router /sugarFormulaQuery/executeAiExplainRange [post]
+func (s *SugarFormulaQueryApi) ExecuteAiExplainRange(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req sugarReq.SugarFormulaAiExplainRangeRequest
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
+		response.FailWithMessage(err.Error(), c)
+		return
+	}
+
+	userId := utils.GetUserID(c)
+	userIdStr := strconv.Itoa(int(userId))
+
+	result, err := sugarFormulaAiService.ExecuteAiExplainFormula(ctx, &req, userIdStr)
+	if err != nil {
+		global.GVA_LOG.Error("AIEXPLAINRange 执行失败!", zap.Error(err))
+		response.FailWithMessage("AIEXPLAINRange 执行失败: "+err.Error(), c)
+		return
+	}
+
+	// 检查业务层返回的错误
+	if result.Error != "" {
+		response.FailWithMessage(result.Error, c)
+		return
+	}
+
+	response.OkWithData(result, c)
+}
