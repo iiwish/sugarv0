@@ -142,7 +142,7 @@ func (s *SysLLMService) chatWithOpenAI(ctx context.Context, config LLMConfig, me
 	// 发送请求
 	timeout := time.Duration(global.GVA_CONFIG.LLM.HTTP.TimeoutSeconds) * time.Second
 	if timeout == 0 {
-		timeout = 60 * time.Second // 默认超时时间
+		timeout = 180 * time.Second // 默认超时时间
 	}
 	client := &http.Client{
 		Timeout: timeout,

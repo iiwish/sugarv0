@@ -8,8 +8,8 @@ import type {
 
 // 导入公式定义
 import { financialFormulas } from './formulas/financial'
-import { aiFormulas } from './formulas/ai'
-import { dbFormulas, forceRefreshDatabaseFormulas } from './formulas/db'
+import { aiFormulas, aiFormulaManager } from './formulas/ai'
+import { dbFormulas, databaseFormulaManager, forceRefreshDatabaseFormulas } from './formulas/db'
 
 /**
  * 自定义公式插件
@@ -163,12 +163,22 @@ export class CustomFormulasPlugin extends BasePlugin {
   ): Promise<void> {
     for (const formula of formulas) {
       try {
-        // 注册公式实现
-        formulaEngine.registerFunction(
-          formula.name,
-          formula.implementation,
-          formula.config
-        )
+        // 根据公式是否异步，调用不同的注册方法
+        if (formula.config?.isAsync) {
+          // 直接注册原始的异步函数
+          // Univer会自动处理Promise，不需要包装器
+          formulaEngine.registerAsyncFunction(
+            formula.name,
+            formula.implementation,
+            formula.config.description // 传递描述信息
+          )
+        } else {
+          formulaEngine.registerFunction(
+            formula.name,
+            formula.implementation,
+            formula.config
+          )
+        }
 
         // 记录已注册的公式
         this.registeredFormulas.set(formula.name, {
@@ -405,6 +415,61 @@ export class CustomFormulasPlugin extends BasePlugin {
     })
 
     return stats
+  }
+
+  /**
+   * 获取所有公式管理器的并发状态
+   */
+  getConcurrencyStatus(): {
+    ai: { current: number; max: number; queued: number; cacheSize: number }
+    database: { current: number; max: number; queued: number; cacheSize: number }
+  } {
+    return {
+      ai: {
+        ...aiFormulaManager.getConcurrencyStatus(),
+        cacheSize: aiFormulaManager.getCacheStats().size
+      },
+      database: {
+        ...databaseFormulaManager.getConcurrencyStatus(),
+        cacheSize: databaseFormulaManager.getCacheStats().size
+      }
+    }
+  }
+
+  /**
+   * 清理所有公式缓存
+   */
+  clearAllFormulaCache(): void {
+    aiFormulaManager.clearCache()
+    databaseFormulaManager.clearCache()
+    forceRefreshDatabaseFormulas()
+    this.context?.logger.info('所有公式缓存已清理')
+  }
+
+  /**
+   * 监控并发计算状态
+   */
+  startConcurrencyMonitoring(intervalMs: number = 5000): () => void {
+    const monitoringInterval = setInterval(() => {
+      const status = this.getConcurrencyStatus()
+      
+      // 记录并发状态
+      this.context?.logger.debug('公式并发状态:', {
+        ai: `${status.ai.current}/${status.ai.max} (队列: ${status.ai.queued}, 缓存: ${status.ai.cacheSize})`,
+        database: `${status.database.current}/${status.database.max} (队列: ${status.database.queued}, 缓存: ${status.database.cacheSize})`
+      })
+
+      // 检查是否有阻塞情况
+      if (status.ai.queued > 10 || status.database.queued > 10) {
+        this.context?.logger.warn('检测到公式计算队列积压:', status)
+      }
+    }, intervalMs)
+
+    // 返回停止监控的函数
+    return () => {
+      clearInterval(monitoringInterval)
+      this.context?.logger.info('公式并发监控已停止')
+    }
   }
 }
 

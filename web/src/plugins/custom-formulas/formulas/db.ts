@@ -9,6 +9,189 @@ import {
 import { useUserStore } from '@/pinia/modules/user'
 
 /**
+ * 数据库公式管理器
+ * 提供数据库公式的并发控制和缓存管理
+ */
+class DatabaseFormulaManager {
+  private cache = new Map<string, { result: any; timestamp: number; ttl: number }>()
+  private pendingRequests = new Map<string, Promise<any>>()
+  private maxConcurrentRequests = 15 // 数据库查询并发数可以更高
+  private currentRequests = 0
+  private requestQueue: Array<() => void> = []
+  private defaultCacheTTL = 2 * 60 * 1000 // 2分钟缓存（比AI短一些）
+  private requestTimeout = 30000 // 30秒超时
+
+  /**
+   * 生成缓存键
+   */
+  private generateCacheKey(endpoint: string, data: any): string {
+    return `${endpoint}:${JSON.stringify(data)}`
+  }
+
+  /**
+   * 检查缓存是否有效
+   */
+  private isCacheValid(entry: { result: any; timestamp: number; ttl: number }): boolean {
+    return Date.now() - entry.timestamp < entry.ttl
+  }
+
+  /**
+   * 清理过期缓存
+   */
+  private cleanExpiredCache(): void {
+    const now = Date.now()
+    const keysToDelete: string[] = []
+    
+    this.cache.forEach((entry, key) => {
+      if (now - entry.timestamp >= entry.ttl) {
+        keysToDelete.push(key)
+      }
+    })
+    
+    keysToDelete.forEach(key => {
+      this.cache.delete(key)
+    })
+  }
+
+  /**
+   * 执行异步数据库请求
+   */
+  async executeDatabaseRequest(endpoint: string, requestData: any, cacheTTL?: number): Promise<any> {
+    const cacheKey = this.generateCacheKey(endpoint, requestData)
+    
+    // 检查缓存
+    const cachedEntry = this.cache.get(cacheKey)
+    if (cachedEntry && this.isCacheValid(cachedEntry)) {
+      return cachedEntry.result
+    }
+
+    // 检查是否有相同的请求正在进行
+    const pendingRequest = this.pendingRequests.get(cacheKey)
+    if (pendingRequest) {
+      return await pendingRequest
+    }
+
+    // 创建新的请求Promise
+    const requestPromise = this.makeRequest(endpoint, requestData, cacheKey, cacheTTL || this.defaultCacheTTL)
+    
+    // 记录正在进行的请求
+    this.pendingRequests.set(cacheKey, requestPromise)
+
+    try {
+      const result = await requestPromise
+      return result
+    } finally {
+      // 清理完成的请求
+      this.pendingRequests.delete(cacheKey)
+    }
+  }
+
+  /**
+   * 实际执行HTTP请求
+   */
+  private async makeRequest(endpoint: string, requestData: any, cacheKey: string, cacheTTL: number): Promise<any> {
+    // 并发控制
+    if (this.currentRequests >= this.maxConcurrentRequests) {
+      await new Promise<void>((resolve) => {
+        this.requestQueue.push(resolve)
+      })
+    }
+
+    this.currentRequests++
+
+    try {
+      const userStore = useUserStore()
+      
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(userStore.token && { 'x-token': userStore.token }),
+          ...((userStore.userInfo as any)?.ID && { 'x-user-id': (userStore.userInfo as any).ID })
+        },
+        body: JSON.stringify(requestData),
+        signal: AbortSignal.timeout(this.requestTimeout)
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+
+      const result = await response.json()
+      
+      if (result.code === 0) {
+        // 缓存结果
+        this.cache.set(cacheKey, {
+          result: result,
+          timestamp: Date.now(),
+          ttl: cacheTTL
+        })
+        
+        // 定期清理过期缓存
+        if (Math.random() < 0.1) { // 10%概率清理
+          this.cleanExpiredCache()
+        }
+        
+        return result
+      } else {
+        throw new Error(result.msg || 'API请求失败')
+      }
+    } catch (error) {
+      if (error.name === 'TimeoutError') {
+        throw new Error('请求超时')
+      } else if (error.name === 'AbortError') {
+        throw new Error('请求被中止')
+      } else {
+        throw error
+      }
+    } finally {
+      this.currentRequests--
+      
+      // 处理队列中的下一个请求
+      if (this.requestQueue.length > 0) {
+        const nextResolve = this.requestQueue.shift()
+        if (nextResolve) {
+          // 使用 setTimeout 确保异步执行，避免阻塞当前请求
+          setTimeout(() => nextResolve(), 0)
+        }
+      }
+    }
+  }
+
+  /**
+   * 清理所有缓存
+   */
+  clearCache(): void {
+    this.cache.clear()
+  }
+
+  /**
+   * 获取缓存统计信息
+   */
+  getCacheStats(): { size: number; pendingRequests: number; currentRequests: number } {
+    return {
+      size: this.cache.size,
+      pendingRequests: this.pendingRequests.size,
+      currentRequests: this.currentRequests
+    }
+  }
+
+  /**
+   * 获取当前并发状态
+   */
+  getConcurrencyStatus(): { current: number; max: number; queued: number } {
+    return {
+      current: this.currentRequests,
+      max: this.maxConcurrentRequests,
+      queued: this.requestQueue.length
+    }
+  }
+}
+
+// 全局数据库公式管理器实例
+const databaseFormulaManager = new DatabaseFormulaManager()
+
+/**
  * 向下填充配置接口
  */
 interface FillDownConfig {
@@ -539,10 +722,29 @@ export function forceRefreshDatabaseFormulas(): void {
 export const dbFormulas = [
   {
     name: 'SUGAR.CALC',
-    implementation: (modelName: any, calcColumn: any, calcMethod: any, ...filters: any[]) => {
+    implementation: async (modelName: any, calcColumn: any, calcMethod: any, ...filters: any[]) => {
       // 参数验证：至少需要3个参数（模型名称、计算列、计算方式）
       if (!modelName || !calcColumn || !calcMethod) {
         return '#VALUE!'
+      }
+
+      // 检查是否为Excel错误值
+      const isExcelError = (value: any): boolean => {
+        if (typeof value === 'string') {
+          return /^#(NAME\?|VALUE!|REF!|DIV\/0!|NUM!|N\/A|NULL!)$/.test(value)
+        }
+        return false
+      }
+
+      // 如果参数包含Excel错误值，直接返回该错误
+      if (isExcelError(modelName)) {
+        return modelName
+      }
+      if (isExcelError(calcColumn)) {
+        return calcColumn
+      }
+      if (isExcelError(calcMethod)) {
+        return calcMethod
       }
 
       // 转换参数为字符串
@@ -562,6 +764,11 @@ export const dbFormulas = [
       while (i < filters.length) {
         const currentArg = String(filters[i] || '')
         
+        // 检查筛选条件是否包含错误值
+        if (isExcelError(currentArg)) {
+          return currentArg
+        }
+        
         // 检查是否是 "key:value" 格式
         if (currentArg.includes(':')) {
           const [filterKey, ...valueParts] = currentArg.split(':')
@@ -575,6 +782,11 @@ export const dbFormulas = [
           if (i + 1 < filters.length) {
             const filterKey = currentArg
             let filterValue = filters[i + 1]
+            
+            // 检查筛选值是否包含错误值
+            if (isExcelError(filterValue)) {
+              return filterValue
+            }
             
             // 处理嵌套数组的情况（单元格引用）
             if (Array.isArray(filterValue)) {
@@ -612,73 +824,66 @@ export const dbFormulas = [
           filters: filterObj
         }
 
-        // 发送同步请求到后端
-        const xhr = new XMLHttpRequest()
-        xhr.open('POST', '/api/sugarFormulaQuery/executeCalc', false) // 同步请求
-        xhr.setRequestHeader('Content-Type', 'application/json')
+        // 使用数据库公式管理器发送异步请求
+        const result = await databaseFormulaManager.executeDatabaseRequest(
+          '/api/sugarFormulaQuery/executeCalc',
+          requestData
+        )
         
-        // 添加认证头
-        const userStore = useUserStore()
-        if (userStore.token) {
-          xhr.setRequestHeader('x-token', userStore.token)
-        }
-        if ((userStore.userInfo as any).ID) {
-          xhr.setRequestHeader('x-user-id', (userStore.userInfo as any).ID)
-        }
-
-        xhr.send(JSON.stringify(requestData))
-
-        if (xhr.status === 200) {
-          const response = JSON.parse(xhr.responseText)
-          if (response.code === 0 && response.data) {
-            const result = response.data.result
-            if (typeof result === 'number') {
-              return result
-            } else if (result !== null && result !== undefined) {
-              return String(result)
-            }
-          } else {
-            return response.msg || '#ERROR!'
+        if (result.code === 0 && result.data) {
+          const calcResult = result.data.result
+          if (typeof calcResult === 'number') {
+            return calcResult
+          } else if (calcResult !== null && calcResult !== undefined) {
+            return String(calcResult)
           }
         } else {
-          return '#CONNECT!'
+          return result.msg || '#ERROR!'
         }
       } catch (error) {
-        return '#ERROR!'
+        console.error('SUGAR.CALC: 执行异常:', error)
+        if (error.name === 'TimeoutError') {
+          return '#TIMEOUT!'
+        } else if (error.name === 'AbortError') {
+          return '#ABORTED!'
+        } else {
+          return '#ERROR!'
+        }
       }
 
       return '#N/A'
     },
     config: {
+      isAsync: true, // 标记为异步函数
       description: {
         functionName: 'SUGAR.CALC',
-        description: 'formula.functionList.SUGAR.CALC.description',
-        abstract: 'formula.functionList.SUGAR.CALC.abstract',
+        description: '对指定语义模型中的数据列进行聚合计算，返回单个结果。',
+        abstract: '语义模型聚合计算',
         functionParameter: [
           {
-            name: 'formula.functionList.SUGAR.CALC.functionParameter.modelName.name',
-            detail: 'formula.functionList.SUGAR.CALC.functionParameter.modelName.detail',
+            name: '模型名称',
+            detail: '语义模型的友好名称',
             example: '"业务指标查询"',
             require: 1,
             repeat: 0,
           },
           {
-            name: 'formula.functionList.SUGAR.CALC.functionParameter.calcColumn.name',
-            detail: 'formula.functionList.SUGAR.CALC.functionParameter.calcColumn.detail',
+            name: '计算列',
+            detail: '需要进行聚合计算的列的友好名称',
             example: '"指标金额"',
             require: 1,
             repeat: 0,
           },
           {
-            name: 'formula.functionList.SUGAR.CALC.functionParameter.calcMethod.name',
-            detail: 'formula.functionList.SUGAR.CALC.functionParameter.calcMethod.detail',
+            name: '计算方式',
+            detail: '支持 SUM, AVG, COUNT, MAX, MIN',
             example: '"SUM"',
             require: 1,
             repeat: 0,
           },
           {
-            name: 'formula.functionList.SUGAR.CALC.functionParameter.filters.name',
-            detail: 'formula.functionList.SUGAR.CALC.functionParameter.filters.detail',
+            name: '筛选条件',
+            detail: '可选的筛选条件，格式为：筛选列1, 筛选值1, 筛选列2, 筛选值2...',
             example: '"战区名称", "华东战区"',
             require: 0,
             repeat: 1,
@@ -693,10 +898,26 @@ export const dbFormulas = [
   },
   {
     name: 'SUGAR.GET',
-    implementation: (modelName: any, returnColumns: any, ...filters: any[]) => {
+    implementation: async (modelName: any, returnColumns: any, ...filters: any[]) => {
       // 参数验证：至少需要2个参数（模型名称、返回列）
       if (!modelName || !returnColumns) {
         return '#VALUE!'
+      }
+
+      // 检查是否为Excel错误值
+      const isExcelError = (value: any): boolean => {
+        if (typeof value === 'string') {
+          return /^#(NAME\?|VALUE!|REF!|DIV\/0!|NUM!|N\/A|NULL!)$/.test(value)
+        }
+        return false
+      }
+
+      // 如果参数包含Excel错误值，直接返回该错误
+      if (isExcelError(modelName)) {
+        return modelName
+      }
+      if (isExcelError(returnColumns)) {
+        return returnColumns
       }
 
       // 转换参数为字符串
@@ -715,6 +936,11 @@ export const dbFormulas = [
       while (i < filters.length) {
         const currentArg = String(filters[i] || '')
         
+        // 检查筛选条件是否包含错误值
+        if (isExcelError(currentArg)) {
+          return currentArg
+        }
+        
         // 检查是否是 "key:value" 格式
         if (currentArg.includes(':')) {
           const [filterKey, ...valueParts] = currentArg.split(':')
@@ -728,6 +954,11 @@ export const dbFormulas = [
           if (i + 1 < filters.length) {
             const filterKey = currentArg
             let filterValue = filters[i + 1]
+            
+            // 检查筛选值是否包含错误值
+            if (isExcelError(filterValue)) {
+              return filterValue
+            }
             
             // 处理嵌套数组的情况（单元格引用）
             if (Array.isArray(filterValue)) {
@@ -764,102 +995,94 @@ export const dbFormulas = [
           filters: filterObj
         }
 
-        // 发送同步请求到后端
-        const xhr = new XMLHttpRequest()
-        xhr.open('POST', '/api/sugarFormulaQuery/executeGet', false) // 同步请求
-        xhr.setRequestHeader('Content-Type', 'application/json')
-        
-        // 添加认证头
-        const userStore = useUserStore()
-        if (userStore.token) {
-          xhr.setRequestHeader('x-token', userStore.token)
-        }
-        if ((userStore.userInfo as any).ID) {
-          xhr.setRequestHeader('x-user-id', (userStore.userInfo as any).ID)
-        }
-
-        xhr.send(JSON.stringify(requestData))
-
-        if (xhr.status === 200) {
-          const response = JSON.parse(xhr.responseText)
-          if (response.code === 0 && response.data && response.data.results) {
-            const results = response.data.results
+        // 使用数据库公式管理器发送异步请求
+        const result = await databaseFormulaManager.executeDatabaseRequest(
+          '/api/sugarFormulaQuery/executeGet',
+          requestData
+        )
+        if (result.code === 0 && result.data && result.data.results) {
+          const results = result.data.results
+          
+          // 限制最大返回行数，避免性能问题
+          const MAX_ROWS = 1000
+          const limitedResults = results.slice(0, MAX_ROWS)
+          
+          if (results.length > MAX_ROWS) {
+            console.warn(`SUGAR.GET: 数据行数 (${results.length}) 超过限制 (${MAX_ROWS})，已截取前 ${MAX_ROWS} 行`)
+          }
+          
+          // 如果只有一列且只有一行，返回单个值
+          if (columnList.length === 1 && limitedResults.length === 1) {
+            const columnName = columnList[0]
+            const value = limitedResults[0][columnName]
+            return value !== null && value !== undefined ? value : ''
+          }
+          
+          // 如果只有一列但多行，返回数组以支持向下填充
+          if (columnList.length === 1 && limitedResults.length > 1) {
+            const columnName = columnList[0]
+            const values = limitedResults.map((row: any) => {
+              const val = row[columnName]
+              return val !== null && val !== undefined ? val : ''
+            })
             
-            // 限制最大返回行数，避免性能问题
-            const MAX_ROWS = 1000
-            const limitedResults = results.slice(0, MAX_ROWS)
-            
-            if (results.length > MAX_ROWS) {
-              console.warn(`SUGAR.GET: 数据行数 (${results.length}) 超过限制 (${MAX_ROWS})，已截取前 ${MAX_ROWS} 行`)
-            }
-            
-            // 如果只有一列且只有一行，返回单个值
-            if (columnList.length === 1 && limitedResults.length === 1) {
-              const columnName = columnList[0]
-              const value = limitedResults[0][columnName]
-              return value !== null && value !== undefined ? value : ''
-            }
-            
-            // 如果只有一列但多行，返回数组以支持向下填充
-            if (columnList.length === 1 && limitedResults.length > 1) {
-              const columnName = columnList[0]
-              const values = limitedResults.map((row: any) => {
-                const val = row[columnName]
+            // 返回纵向数组格式：每个值作为一行
+            return values.map(val => [val])
+          }
+          
+          // 多列情况，返回二维数组
+          if (columnList.length > 1) {
+            const rows = limitedResults.map((row: any) =>
+              columnList.map(col => {
+                const val = row[col]
                 return val !== null && val !== undefined ? val : ''
               })
-              
-              // 返回纵向数组格式：每个值作为一行
-              return values.map(val => [val])
-            }
-            
-            // 多列情况，返回二维数组
-            if (columnList.length > 1) {
-              const rows = limitedResults.map((row: any) =>
-                columnList.map(col => {
-                  const val = row[col]
-                  return val !== null && val !== undefined ? val : ''
-                })
-              )
-              return rows
-            }
-            
-            // 兜底情况：单列无数据
-            return ''
-          } else {
-            return response.msg || '#ERROR!'
+            )
+            return rows
           }
+          
+          // 兜底情况：单列无数据
+          return ''
         } else {
-          return '#CONNECT!'
+          return result.msg || '#ERROR!'
         }
       } catch (error) {
-        return '#ERROR!'
+        console.error('SUGAR.GET: 执行异常:', error)
+        if (error.name === 'TimeoutError') {
+          return '#TIMEOUT!'
+        } else if (error.name === 'AbortError') {
+          return '#ABORTED!'
+        } else {
+          return '#ERROR!'
+        }
       }
 
       return '#N/A'
     },
     config: {
+      isAsync: true, // 标记为异步函数
       description: {
         functionName: 'SUGAR.GET',
-        description: 'formula.functionList.SUGAR.GET.description',
-        abstract: 'formula.functionList.SUGAR.GET.abstract',
+        description: '从指定语义模型中获取一列或多列明细数据，结果会动态向下填充。',
+        abstract: '语义模型数据查询',
         functionParameter: [
           {
-            name: 'formula.functionList.SUGAR.GET.functionParameter.modelName.name',
-            detail: 'formula.functionList.SUGAR.GET.functionParameter.modelName.detail',
+            name: '模型名称',
+            detail: '语义模型的友好名称',
             example: '"业务指标查询"',
             require: 1,
             repeat: 0,
           },
           {
-            name: 'formula.functionList.SUGAR.GET.functionParameter.returnColumns.name',
-            detail: 'formula.functionList.SUGAR.GET.functionParameter.returnColumns.detail',
+            name: '返回列',
+            detail: '需要返回的列名，多列用逗号分隔',
             example: '"城市名称"',
             require: 1,
             repeat: 0,
           },
           {
-            name: 'formula.functionList.SUGAR.GET.functionParameter.filters.name',
-            detail: 'formula.functionList.SUGAR.GET.functionParameter.filters.detail',
+            name: '筛选条件',
+            detail: '可选的筛选条件，格式为：筛选列1, 筛选值1, 筛选列2, 筛选值2...',
             example: '"战区名称", "华东战区"',
             require: 0,
             repeat: 1,
@@ -873,3 +1096,6 @@ export const dbFormulas = [
     locales: functionSugarGetZhCN,
   },
 ];
+
+// 导出数据库公式管理器，供外部使用
+export { databaseFormulaManager }

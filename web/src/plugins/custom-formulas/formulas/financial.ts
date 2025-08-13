@@ -130,7 +130,7 @@ export const functionLmdiZhCN = {
  */
 export const financialFormulas = [
   {
-    name: 'LMDI',
+    name: 'SUGAR.LMDI',
     implementation: (baseAggregateValue: any, compAggregateValue: any, baseFactorValue: any, compFactorValue: any) => {
       // 验证输入值必须为正数
       if (baseAggregateValue <= 0 || compAggregateValue <= 0 || baseFactorValue <= 0 || compFactorValue <= 0) {
@@ -159,7 +159,7 @@ export const financialFormulas = [
     },
     config: {
       description: {
-        functionName: 'LMDI',
+        functionName: 'SUGAR.LMDI',
         description: 'formula.functionList.LMDI.description',
         abstract: 'formula.functionList.LMDI.abstract',
         functionParameter: [
