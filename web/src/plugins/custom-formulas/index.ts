@@ -170,7 +170,7 @@ export class CustomFormulasPlugin extends BasePlugin {
           formulaEngine.registerAsyncFunction(
             formula.name,
             formula.implementation,
-            formula.config.description // 传递描述信息
+            formula.config // 传递完整的配置对象，包含参数信息
           )
         } else {
           formulaEngine.registerFunction(

@@ -262,6 +262,32 @@ func (s *SugarFormulaQueryService) buildWhereClause(model *sugar.SugarSemanticMo
 		case ">", "<", ">=", "<=", "!=":
 			conditions = append(conditions, fmt.Sprintf("t.%s %s ?", actualColumn, operator))
 			args = append(args, filterValue)
+		case "IN":
+			// 将筛选条件按照英文逗号拆分成list类型
+			valueStr := fmt.Sprintf("%v", filterValue)
+			values := strings.Split(valueStr, ",")
+
+			// 去除空白字符并过滤空值
+			var cleanValues []string
+			for _, v := range values {
+				trimmed := strings.TrimSpace(v)
+				if trimmed != "" {
+					cleanValues = append(cleanValues, trimmed)
+				}
+			}
+
+			if len(cleanValues) == 0 {
+				return "", nil, errors.New("IN操作符的值列表不能为空")
+			}
+
+			// 构建IN子句的占位符
+			placeholders := make([]string, len(cleanValues))
+			for i, value := range cleanValues {
+				placeholders[i] = "?"
+				args = append(args, value)
+			}
+
+			conditions = append(conditions, fmt.Sprintf("t.%s IN (%s)", actualColumn, strings.Join(placeholders, ",")))
 		default:
 			return "", nil, errors.New("不支持的操作符: " + operator)
 		}

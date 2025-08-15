@@ -19,10 +19,10 @@ type SysLLMService struct{}
 
 // LLMConfig 定义了调用LLM所需的配置
 type LLMConfig struct {
-	BaseURL    string `json:"baseUrl"`    // OpenAI兼容的API地址，例如 https://api.openai.com/v1
-	Token      string `json:"token"`      // API密钥或访问令牌
-	ModelName  string `json:"modelName"`  // 要使用的模型名称
-	ServerName string `json:"serverName"` // MCP Server 的名称（仅在MCP模式下使用，可选）
+	BaseURL             string `json:"baseUrl"`              // OpenAI兼容的API地址，例如 https://api.openai.com/v1
+	Token               string `json:"token"`                // API密钥或访问令牌
+	ModelName           string `json:"modelName"`            // 要使用的模型名称
+	EnableAnonymization bool   `json:"enable_anonymization"` //
 }
 
 // ChatMessage 聊天消息结构
