@@ -188,6 +188,9 @@ func (s *SugarFormulaQueryService) buildGetSQL(model *sugar.SugarSemanticModels,
 
 	// 构建SELECT子句
 	var selectColumns []string
+	var groupByColumns []string
+
+	// 处理返回列
 	for _, columnName := range req.ReturnColumns {
 		columnConfig, exists := returnableColumns[columnName]
 		if !exists {
@@ -199,7 +202,43 @@ func (s *SugarFormulaQueryService) buildGetSQL(model *sugar.SugarSemanticModels,
 			return "", nil, errors.New("返回列配置错误: " + columnName)
 		}
 
-		selectColumns = append(selectColumns, fmt.Sprintf("t.%s AS `%s`", actualColumn, columnName))
+		// 检查列类型，如果是metric类型且有GroupBy，则需要聚合
+		columnType, _ := columnConfig["type"].(string)
+		if len(req.GroupBy) > 0 && columnType == "metric" {
+			// 对于指标列，使用SUM聚合
+			selectColumns = append(selectColumns, fmt.Sprintf("SUM(t.%s) AS `%s`", actualColumn, columnName))
+		} else {
+			selectColumns = append(selectColumns, fmt.Sprintf("t.%s AS `%s`", actualColumn, columnName))
+		}
+	}
+
+	// 处理GroupBy列
+	if len(req.GroupBy) > 0 {
+		for _, groupByColumn := range req.GroupBy {
+			columnConfig, exists := returnableColumns[groupByColumn]
+			if !exists {
+				return "", nil, errors.New("分组列不存在: " + groupByColumn)
+			}
+
+			actualColumn, ok := columnConfig["column"].(string)
+			if !ok {
+				return "", nil, errors.New("分组列配置错误: " + groupByColumn)
+			}
+
+			groupByColumns = append(groupByColumns, fmt.Sprintf("t.%s", actualColumn))
+
+			// 如果分组列不在返回列中，需要添加到SELECT中
+			found := false
+			for _, returnCol := range req.ReturnColumns {
+				if returnCol == groupByColumn {
+					found = true
+					break
+				}
+			}
+			if !found {
+				selectColumns = append(selectColumns, fmt.Sprintf("t.%s AS `%s`", actualColumn, groupByColumn))
+			}
+		}
 	}
 
 	selectClause := "SELECT " + strings.Join(selectColumns, ", ")
@@ -216,6 +255,11 @@ func (s *SugarFormulaQueryService) buildGetSQL(model *sugar.SugarSemanticModels,
 	sql := selectClause + " " + fromClause
 	if whereClause != "" {
 		sql += " WHERE " + whereClause
+	}
+
+	// 添加GROUP BY子句
+	if len(groupByColumns) > 0 {
+		sql += " GROUP BY " + strings.Join(groupByColumns, ", ")
 	}
 
 	return sql, args, nil

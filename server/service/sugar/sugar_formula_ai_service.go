@@ -14,14 +14,36 @@ import (
 	"github.com/flipped-aurora/gin-vue-admin/server/model/sugar"
 	sugarReq "github.com/flipped-aurora/gin-vue-admin/server/model/sugar/request"
 	sugarRes "github.com/flipped-aurora/gin-vue-admin/server/model/sugar/response"
+	"github.com/flipped-aurora/gin-vue-admin/server/service/sugar/advanced_contribution_analyzer"
+	anonymization_lite "github.com/flipped-aurora/gin-vue-admin/server/service/sugar/anonymization_lite"
 	"github.com/flipped-aurora/gin-vue-admin/server/service/system"
 	"go.uber.org/zap"
 )
 
-type SugarFormulaAiService struct{}
+type SugarFormulaAiService struct {
+	advancedAnalyzer *advanced_contribution_analyzer.AdvancedContributionService
+}
 
 var llmService = system.SysLLMService{}
 var executionLogService = SugarExecutionLogService{}
+var contributionAnalyzer = SugarContributionAnalyzer{}
+
+// NewSugarFormulaAiService 创建新的AI服务实例
+func NewSugarFormulaAiService() *SugarFormulaAiService {
+	return &SugarFormulaAiService{
+		advancedAnalyzer: advanced_contribution_analyzer.NewAdvancedContributionService(nil),
+	}
+}
+
+// GetSugarFormulaAiService 获取AI服务实例（单例模式）
+var sugarFormulaAiServiceInstance *SugarFormulaAiService
+
+func GetSugarFormulaAiService() *SugarFormulaAiService {
+	if sugarFormulaAiServiceInstance == nil {
+		sugarFormulaAiServiceInstance = NewSugarFormulaAiService()
+	}
+	return sugarFormulaAiServiceInstance
+}
 
 // init 包初始化，设置随机种子
 func init() {
@@ -564,15 +586,8 @@ func (s *SugarFormulaAiService) getAiExplainPrompt() (*sugar.SugarAgents, error)
 
 // buildSystemPrompt 构建智能系统提示词
 func (s *SugarFormulaAiService) buildSystemPrompt(agent *sugar.SugarAgents, userId string) string {
-	basePrompt := ""
-	if agent.Prompt != nil && *agent.Prompt != "" {
-		basePrompt = *agent.Prompt
-	} else {
-		basePrompt = "你是一个专业的数据分析师，请根据用户的需求进行数据分析。"
-	}
-
-	// 构建智能化的系统提示词
-	enhancedPrompt := fmt.Sprintf(`%s
+	// 构建工具调用的系统提示词（不包含具体的分析提示词）
+	enhancedPrompt := fmt.Sprintf(`你是一个专业的数据分析助手，专门负责调用数据分析工具。
 
 📋 重要工作流程指导：
 1. **使用智能匿名化分析工具**：对于贡献度分析需求，请使用 smart_anonymized_analyzer 工具，它会自动完成数据验证和匿名化分析的完整流程
@@ -590,7 +605,43 @@ func (s *SugarFormulaAiService) buildSystemPrompt(agent *sugar.SugarAgents, user
 - 优先分析数据中贡献度最高的维度组合
 - 对异常值和趋势变化提供深入洞察
 - 结合业务常识给出可操作的建议
-- 明确说明分析的局限性和数据范围`, basePrompt, userId)
+- 明确说明分析的局限性和数据范围`, userId)
+
+	return enhancedPrompt
+}
+
+// buildAnalysisSystemPrompt 构建数据分析的系统提示词（包含Agent配置的提示词）
+func (s *SugarFormulaAiService) buildAnalysisSystemPrompt(agent *sugar.SugarAgents, userId string) string {
+	basePrompt := ""
+	if agent.Prompt != nil && *agent.Prompt != "" {
+		basePrompt = *agent.Prompt
+	} else {
+		basePrompt = "你是一个专业的财务数据分析师，擅长从匿名化数据中挖掘商业洞察。"
+	}
+
+	// 构建针对匿名化数据分析的增强提示词
+	enhancedPrompt := fmt.Sprintf(`%s
+
+🎯 分析输出要求：
+1. **简洁明了**：用一句话总结最关键的发现，避免冗长的技术描述
+2. **业务导向**：使用业务语言，如"各银行账户存款普遍增长，交通银行欧元专户增幅显著"
+3. **突出重点**：重点关注贡献度最高的变化项目
+4. **可读性强**：避免使用匿名代号，直接描述业务含义
+
+📊 **数据理解要求**：
+1. **匿名化数据解读**：数据中的维度代号（如DIM01、LOC01）和值代号（如DIM01_GN01）都是匿名化处理的敏感业务维度
+2. **贡献度优先排序**：重点分析贡献度绝对值最大的维度组合，识别主要驱动因子
+3. **正负向分类**：区分正向驱动因子和负向拖累因子
+
+📈 **输出格式要求**：
+- 严格限制在一句话以内，不超过30个字
+- 直接点出哪个组合变化最突出
+- 禁止任何复杂的分析、数据罗列、专业术语解释或提出建议
+
+⚠️ **重要注意事项**：
+- 由于数据已匿名化，分析时要通过匿名映射还原真实的业务含义
+- 关注数据模式和相对关系，而非绝对值
+- 如发现数据异常或不完整，要明确指出并说明对结论的影响`, basePrompt)
 
 	return enhancedPrompt
 }
@@ -754,13 +805,13 @@ func (s *SugarFormulaAiService) performDataAnalysis(ctx context.Context, dataTex
 		zap.String("userDescription", userDescription),
 		zap.String("dataLength", fmt.Sprintf("%d", len(dataText))))
 
-	// 构建上下文感知的分析提示词
-	systemPrompt := s.buildContextAwareAnalysisPrompt(agent)
-	global.GVA_LOG.Debug("构建上下文感知分析系统提示词", zap.String("systemPrompt", systemPrompt))
+	// 使用专门的分析提示词（包含Agent配置）
+	systemPrompt := s.buildAnalysisSystemPrompt(agent, "")
+	global.GVA_LOG.Debug("构建分析系统提示词", zap.String("systemPrompt", systemPrompt))
 
-	// 构建增强的用户消息，包含数据范围说明和分析要求
-	userMessage := s.buildEnhancedAnalysisMessage(dataText, userDescription)
-	global.GVA_LOG.Debug("构建增强分析用户消息", zap.String("userMessage", userMessage))
+	// 构建简化的用户消息，专注于匿名化数据分析
+	userMessage := s.buildSimplifiedAnalysisMessage(dataText, userDescription)
+	global.GVA_LOG.Debug("构建简化分析用户消息", zap.String("userMessage", userMessage))
 
 	// 构建消息列表
 	messages := []system.ChatMessage{
@@ -784,6 +835,26 @@ func (s *SugarFormulaAiService) performDataAnalysis(ctx context.Context, dataTex
 
 	global.GVA_LOG.Debug("数据分析响应", zap.String("response", response))
 	return response, nil
+}
+
+// buildSimplifiedAnalysisMessage 构建简化的分析消息
+func (s *SugarFormulaAiService) buildSimplifiedAnalysisMessage(dataText string, userDescription string) string {
+	var builder strings.Builder
+
+	builder.WriteString("请基于以下匿名化数据进行分析：\n\n")
+	builder.WriteString(dataText)
+	builder.WriteString("\n")
+
+	builder.WriteString("分析要求：")
+	builder.WriteString(userDescription)
+	builder.WriteString("\n\n")
+
+	builder.WriteString("请用一句话总结最显著的变化，格式参考：\n")
+	builder.WriteString("- 各银行账户存款普遍增长，交通银行欧元专户增幅显著\n")
+	builder.WriteString("- 客户E大额应收账款减少，其他客户账龄结构优化\n")
+	builder.WriteString("- 各仓库存货变动微小，广州仓待报废库存商品略减\n")
+
+	return builder.String()
 }
 
 // buildContextAwareAnalysisPrompt 构建上下文感知的分析提示词
@@ -1062,10 +1133,162 @@ func (s *SugarFormulaAiService) processAnonymizedDataAnalysis(ctx context.Contex
 	return session, nil
 }
 
+// filterWildcardConditions 过滤掉通配符条件，避免无效查询
+func (s *SugarFormulaAiService) filterWildcardConditions(filters map[string]interface{}) map[string]interface{} {
+	if filters == nil {
+		return make(map[string]interface{})
+	}
+
+	cleanedFilters := make(map[string]interface{})
+	wildcardPatterns := []string{"*", "%", "all", "全部", "所有"} // 常见的通配符模式
+
+	for key, value := range filters {
+		valueStr := fmt.Sprintf("%v", value)
+		isWildcard := false
+
+		// 检查是否为通配符
+		for _, pattern := range wildcardPatterns {
+			if valueStr == pattern {
+				isWildcard = true
+				break
+			}
+		}
+
+		// 只保留非通配符条件
+		if !isWildcard && valueStr != "" && valueStr != "<nil>" {
+			cleanedFilters[key] = value
+		}
+	}
+
+	global.GVA_LOG.Debug("筛选条件清理",
+		zap.Int("原始条件数", len(filters)),
+		zap.Int("清理后条件数", len(cleanedFilters)),
+		zap.Any("原始条件", filters),
+		zap.Any("清理后条件", cleanedFilters))
+
+	return cleanedFilters
+}
+
 // fetchDataConcurrently 并发获取本期和基期数据
 func (s *SugarFormulaAiService) fetchDataConcurrently(ctx context.Context, modelName, targetMetric string, currentPeriodFilters, basePeriodFilters map[string]interface{}, groupByDimensions []string, userId string) (*sugarRes.SugarFormulaGetResponse, *sugarRes.SugarFormulaGetResponse, error) {
+	// 检查是否为年初年末对比类型的表（如货币资金表）
+	isYearEndComparison := s.isYearEndComparisonModel(modelName, targetMetric)
+
+	if isYearEndComparison {
+		// 对于年初年末对比类型，使用特殊的数据获取逻辑
+		return s.fetchYearEndComparisonData(ctx, modelName, targetMetric, currentPeriodFilters, groupByDimensions, userId)
+	}
+
+	// 原有的并发获取逻辑（用于有时间维度的表）
+	return s.fetchTimeBasedData(ctx, modelName, targetMetric, currentPeriodFilters, basePeriodFilters, groupByDimensions, userId)
+}
+
+// isYearEndComparisonModel 判断是否为年初年末对比类型的模型
+func (s *SugarFormulaAiService) isYearEndComparisonModel(modelName, targetMetric string) bool {
+	// 检查模型名称和目标指标，判断是否为年初年末对比类型
+	modelNameLower := strings.ToLower(modelName)
+	targetMetricLower := strings.ToLower(targetMetric)
+
+	// 年初年末对比类型的表通常包含这些关键词
+	yearEndModels := []string{"货币资金", "cash", "应收账款", "receivable", "存货", "inventory",
+		"固定资产", "fixed", "无形资产", "intangible", "应付账款", "payable",
+		"短期借款", "short_term", "长期借款", "long_term", "实收资本", "capital", "未分配利润", "retained"}
+
+	yearEndMetrics := []string{"年末金额", "ending_balance", "年初金额", "beginning_balance"}
+
+	// 检查模型名称
+	for _, keyword := range yearEndModels {
+		if strings.Contains(modelNameLower, keyword) {
+			// 进一步检查目标指标
+			for _, metric := range yearEndMetrics {
+				if strings.Contains(targetMetricLower, metric) {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+// fetchYearEndComparisonData 获取年初年末对比数据
+func (s *SugarFormulaAiService) fetchYearEndComparisonData(ctx context.Context, modelName, targetMetric string, filters map[string]interface{}, groupByDimensions []string, userId string) (*sugarRes.SugarFormulaGetResponse, *sugarRes.SugarFormulaGetResponse, error) {
+	// 对于年初年末对比，我们需要同时获取年初和年末数据
+	// 构建返回列：年末金额 + 年初金额 + 分组维度
+	returnColumns := append([]string{"年末金额", "年初金额"}, groupByDimensions...)
+
+	// 过滤掉通配符条件
+	cleanedFilters := s.filterWildcardConditions(filters)
+
+	// 获取完整数据（包含年初和年末）
+	req := &sugarReq.SugarFormulaGetRequest{
+		ModelName:     modelName,
+		ReturnColumns: returnColumns,
+		Filters:       cleanedFilters,
+	}
+
+	formulaQueryService := SugarFormulaQueryService{}
+	fullData, err := formulaQueryService.ExecuteGetFormula(ctx, req, userId)
+	if err != nil {
+		return nil, nil, fmt.Errorf("获取年初年末数据失败: %w", err)
+	}
+	if fullData.Error != "" {
+		return nil, nil, fmt.Errorf("年初年末数据查询错误: %s", fullData.Error)
+	}
+
+	// 构造当前期数据（年末金额）和基期数据（年初金额）
+	currentData := &sugarRes.SugarFormulaGetResponse{
+		Results: make([]map[string]interface{}, len(fullData.Results)),
+		Error:   "",
+	}
+
+	baseData := &sugarRes.SugarFormulaGetResponse{
+		Results: make([]map[string]interface{}, len(fullData.Results)),
+		Error:   "",
+	}
+
+	// 转换数据格式
+	for i, row := range fullData.Results {
+		// 当前期数据：使用年末金额作为目标指标值
+		currentRow := make(map[string]interface{})
+		for key, value := range row {
+			if key == "年末金额" {
+				currentRow[targetMetric] = value // 将年末金额映射到目标指标
+			} else if key != "年初金额" { // 排除年初金额
+				currentRow[key] = value
+			}
+		}
+		currentData.Results[i] = currentRow
+
+		// 基期数据：使用年初金额作为目标指标值
+		baseRow := make(map[string]interface{})
+		for key, value := range row {
+			if key == "年初金额" {
+				baseRow[targetMetric] = value // 将年初金额映射到目标指标
+			} else if key != "年末金额" { // 排除年末金额
+				baseRow[key] = value
+			}
+		}
+		baseData.Results[i] = baseRow
+	}
+
+	global.GVA_LOG.Info("年初年末对比数据获取完成",
+		zap.Int("totalRecords", len(fullData.Results)),
+		zap.Int("currentDataCount", len(currentData.Results)),
+		zap.Int("baseDataCount", len(baseData.Results)),
+		zap.String("targetMetric", targetMetric))
+
+	return currentData, baseData, nil
+}
+
+// fetchTimeBasedData 获取基于时间维度的数据（原有逻辑）
+func (s *SugarFormulaAiService) fetchTimeBasedData(ctx context.Context, modelName, targetMetric string, currentPeriodFilters, basePeriodFilters map[string]interface{}, groupByDimensions []string, userId string) (*sugarRes.SugarFormulaGetResponse, *sugarRes.SugarFormulaGetResponse, error) {
 	// 构建返回列：目标指标 + 分组维度
 	returnColumns := append([]string{targetMetric}, groupByDimensions...)
+
+	// 过滤掉通配符条件
+	cleanedCurrentFilters := s.filterWildcardConditions(currentPeriodFilters)
+	cleanedBaseFilters := s.filterWildcardConditions(basePeriodFilters)
 
 	// 使用通道进行并发处理
 	type dataResult struct {
@@ -1081,7 +1304,7 @@ func (s *SugarFormulaAiService) fetchDataConcurrently(ctx context.Context, model
 		currentReq := &sugarReq.SugarFormulaGetRequest{
 			ModelName:     modelName,
 			ReturnColumns: returnColumns,
-			Filters:       currentPeriodFilters,
+			Filters:       cleanedCurrentFilters,
 		}
 		formulaQueryService := SugarFormulaQueryService{}
 		currentData, err := formulaQueryService.ExecuteGetFormula(ctx, currentReq, userId)
@@ -1101,7 +1324,7 @@ func (s *SugarFormulaAiService) fetchDataConcurrently(ctx context.Context, model
 		baseReq := &sugarReq.SugarFormulaGetRequest{
 			ModelName:     modelName,
 			ReturnColumns: returnColumns,
-			Filters:       basePeriodFilters,
+			Filters:       cleanedBaseFilters,
 		}
 		formulaQueryService := SugarFormulaQueryService{}
 		baseData, err := formulaQueryService.ExecuteGetFormula(ctx, baseReq, userId)
@@ -1127,9 +1350,13 @@ func (s *SugarFormulaAiService) fetchDataConcurrently(ctx context.Context, model
 		return nil, nil, baseResult.err
 	}
 
-	global.GVA_LOG.Info("数据获取完成",
+	global.GVA_LOG.Info("基于时间维度的数据获取完成",
 		zap.Int("currentDataCount", len(currentResult.data.Results)),
-		zap.Int("baseDataCount", len(baseResult.data.Results)))
+		zap.Int("baseDataCount", len(baseResult.data.Results)),
+		zap.Int("originalCurrentFilters", len(currentPeriodFilters)),
+		zap.Int("cleanedCurrentFilters", len(cleanedCurrentFilters)),
+		zap.Int("originalBaseFilters", len(basePeriodFilters)),
+		zap.Int("cleanedBaseFilters", len(cleanedBaseFilters)))
 
 	return currentResult.data, baseResult.data, nil
 }
@@ -1815,7 +2042,7 @@ func (s *SugarFormulaAiService) handleSmartAnonymizedAnalyzer(ctx context.Contex
 	enableDataValidation, _ := args["enableDataValidation"].(bool)
 
 	// 默认启用数据验证
-	if enableDataValidation {
+	if !enableDataValidation {
 		enableDataValidation = true
 	}
 
@@ -1852,44 +2079,37 @@ func (s *SugarFormulaAiService) handleSmartAnonymizedAnalyzer(ctx context.Contex
 
 		// 如果数据不可用，返回建议
 		if !validationResult.IsDataAvailable {
-			validationMessage = fmt.Sprintf("⚠️ 数据验证提示：%s\n\n", validationResult.ValidationMessage)
+			validationMessage = fmt.Sprintf("⚠️%s\n\n", validationResult.ValidationMessage)
 		} else {
-			validationMessage = "✅ 数据验证通过，开始进行匿名化分析。\n\n"
+			validationMessage = "✅\n\n"
 		}
 	}
 
-	// 第二步：执行匿名化数据处理
-	anonymizedResult, err := s.processAnonymizedDataAnalysis(ctx, modelName, targetMetric, currentPeriodFilters, basePeriodFilters, groupByDimensions, userId)
+	// 第二步：使用增强版分析器进行智能分析
+	aiDataText, liteSession, err := s.processAdvancedContributionAnalysis(ctx, modelName, targetMetric, currentPeriodFilters, basePeriodFilters, groupByDimensions, userId)
 	if err != nil {
-		global.GVA_LOG.Error("匿名化数据处理失败", zap.Error(err))
+		global.GVA_LOG.Error("增强版分析器处理失败", zap.Error(err))
 
 		if logCtx != nil {
 			durationMs := int(time.Since(toolCallStartTime).Milliseconds())
-			errorMsg := "匿名化数据处理失败: " + err.Error()
+			errorMsg := "增强版分析器处理失败: " + err.Error()
 			executionLogService.RecordToolCall(ctx, logCtx, toolCall.Function.Name, args, nil, &errorMsg, durationMs, true)
 		}
 
-		return sugarRes.NewAiErrorResponse("匿名化数据处理失败: " + err.Error()), nil
+		return sugarRes.NewAiErrorResponse("增强版分析器处理失败: " + err.Error()), nil
 	}
 
-	// 第三步：将匿名化数据转换为AI可读格式
-	aiDataText, err := s.serializeAnonymizedDataToText(anonymizedResult.AIReadyData)
-	if err != nil {
-		return sugarRes.NewAiErrorResponse("匿名化数据序列化失败: " + err.Error()), nil
-	}
-
-	global.GVA_LOG.Info("数据已完成匿名化处理，准备发送给AI",
-		zap.Int("anonymizedDataLength", len(aiDataText)),
-		zap.Int("mappingCount", len(anonymizedResult.forwardMap)))
+	global.GVA_LOG.Info("数据已完成lite版本匿名化处理，准备发送给AI",
+		zap.Int("anonymizedDataLength", len(aiDataText)))
 
 	// 更新日志记录匿名化信息
 	if logCtx != nil {
 		anonymizedInputData := map[string]interface{}{
 			"aiDataText":        aiDataText,
 			"toolCall":          toolCall.Function.Arguments,
-			"mappingCount":      len(anonymizedResult.forwardMap),
 			"isEncrypted":       true,
 			"validationEnabled": enableDataValidation,
+			"used_lite_version": true,
 		}
 		_ = executionLogService.UpdateExecutionLogWithAnonymization(ctx, logCtx, anonymizedInputData, nil)
 	}
@@ -1909,33 +2129,42 @@ func (s *SugarFormulaAiService) handleSmartAnonymizedAnalyzer(ctx context.Contex
 		_ = executionLogService.UpdateExecutionLogWithAnonymization(ctx, logCtx, nil, &analysisResult)
 	}
 
-	// 第五步：解密AI分析结果
-	decodedResult, err := s.decodeAIResponse(anonymizedResult, analysisResult)
+	// 第五步：解密AI分析结果（使用lite版本的解码逻辑）
+	decodedResult, err := s.decodeLiteAIResponseWithSession(liteSession, analysisResult)
 	if err != nil {
-		global.GVA_LOG.Error("AI结果解密失败", zap.Error(err))
+		global.GVA_LOG.Error("lite版本AI结果解密失败", zap.Error(err))
 
 		if logCtx != nil {
 			durationMs := int(time.Since(toolCallStartTime).Milliseconds())
-			errorMsg := "AI结果解密失败: " + err.Error()
+			errorMsg := "lite版本AI结果解密失败: " + err.Error()
 			executionLogService.RecordToolCall(ctx, logCtx, toolCall.Function.Name, args, nil, &errorMsg, durationMs, true)
 		}
 
-		return sugarRes.NewAiErrorResponse("AI结果解密失败: " + err.Error()), nil
+		return sugarRes.NewAiErrorResponse("lite版本AI结果解密失败: " + err.Error()), nil
 	}
+
+	global.GVA_LOG.Info("lite版本AI响应解密完成",
+		zap.Int("originalLength", len(analysisResult)),
+		zap.Int("decodedLength", len(decodedResult)))
 
 	// 第六步：组合最终结果
 	finalResult := validationMessage + decodedResult
 
 	global.GVA_LOG.Info("智能匿名化分析完成，返回最终结果",
-		zap.Int("finalLength", len(finalResult)))
+		zap.Int("finalLength", len(finalResult)),
+		zap.Bool("usedLiteVersion", true))
 
 	// 记录工具调用成功
 	if logCtx != nil {
 		durationMs := int(time.Since(toolCallStartTime).Milliseconds())
+		// lite版本从aiDataText推算数据条数
+		dataCount := strings.Count(aiDataText, "项目")
+
 		toolResult := map[string]interface{}{
 			"decoded_result":        decodedResult,
-			"anonymized_data_count": len(anonymizedResult.AIReadyData),
+			"anonymized_data_count": dataCount,
 			"validation_enabled":    enableDataValidation,
+			"used_lite_version":     true,
 		}
 		executionLogService.RecordToolCall(ctx, logCtx, toolCall.Function.Name, args, toolResult, nil, durationMs, true)
 	}
@@ -1964,6 +2193,90 @@ func (s *SugarFormulaAiService) validateDataAvailability(ctx context.Context, mo
 		MissingDimensions: make([]string, 0),
 	}
 
+	// 检查是否为年初年末对比类型的表
+	isYearEndComparison := s.isYearEndComparisonModel(modelName, "")
+
+	if isYearEndComparison {
+		// 对于年初年末对比类型，使用特殊的验证逻辑
+		return s.validateYearEndComparisonData(ctx, modelName, groupByDimensions, currentPeriodFilters, userId, result)
+	}
+
+	// 原有的基于时间维度的验证逻辑
+	return s.validateTimeBasedData(ctx, modelName, groupByDimensions, currentPeriodFilters, basePeriodFilters, userId, result)
+}
+
+// validateYearEndComparisonData 验证年初年末对比数据的可用性
+func (s *SugarFormulaAiService) validateYearEndComparisonData(ctx context.Context, modelName string, groupByDimensions []string, filters map[string]interface{}, userId string, result *DataValidationResult) (*DataValidationResult, error) {
+	global.GVA_LOG.Info("验证年初年末对比数据可用性", zap.String("modelName", modelName))
+
+	// 构建验证查询 - 需要包含年初和年末金额字段
+	returnColumns := append([]string{"年末金额", "年初金额"}, groupByDimensions...)
+	if len(groupByDimensions) == 0 {
+		returnColumns = []string{"年末金额", "年初金额"}
+	}
+
+	// 过滤掉通配符条件
+	cleanedFilters := s.filterWildcardConditions(filters)
+
+	validateReq := &sugarReq.SugarFormulaGetRequest{
+		ModelName:     modelName,
+		ReturnColumns: returnColumns,
+		Filters:       cleanedFilters,
+	}
+
+	// 执行验证查询
+	formulaQueryService := SugarFormulaQueryService{}
+	validateData, err := formulaQueryService.ExecuteGetFormula(ctx, validateReq, userId)
+	if err != nil {
+		return nil, fmt.Errorf("执行年初年末验证查询失败: %w", err)
+	}
+	if validateData.Error != "" {
+		return nil, fmt.Errorf("年初年末验证查询错误: %s", validateData.Error)
+	}
+
+	// 统计实际返回的记录数
+	result.RecordCount = len(validateData.Results)
+
+	// 验证数据质量：检查年初和年末金额字段是否存在且有效
+	validRecordCount := 0
+	for _, record := range validateData.Results {
+		beginningBalance := s.extractFloatValue(record["年初金额"])
+		endingBalance := s.extractFloatValue(record["年末金额"])
+
+		// 至少有一个金额字段有值才算有效记录
+		if beginningBalance != 0 || endingBalance != 0 {
+			validRecordCount++
+		}
+	}
+
+	// 判断数据可用性
+	if result.RecordCount == 0 {
+		result.IsDataAvailable = false
+		result.ValidationMessage = "根据您提供的筛选条件，未找到匹配的年初年末对比数据记录。建议检查筛选条件是否正确。"
+	} else if validRecordCount == 0 {
+		result.IsDataAvailable = false
+		result.ValidationMessage = fmt.Sprintf("找到%d条记录，但年初和年末金额字段均为空。请检查数据完整性。", result.RecordCount)
+	} else if validRecordCount < 3 {
+		result.IsDataAvailable = false
+		result.ValidationMessage = fmt.Sprintf("找到%d条记录，但只有%d条有效记录。数据量过少，无法进行可靠的贡献度分析。建议调整筛选条件。", result.RecordCount, validRecordCount)
+	} else {
+		result.IsDataAvailable = true
+		result.ValidationMessage = fmt.Sprintf("数据验证通过：找到%d条记录，其中%d条有效记录，可以进行年初年末对比分析。", result.RecordCount, validRecordCount)
+	}
+
+	global.GVA_LOG.Info("年初年末对比数据验证完成",
+		zap.Bool("isDataAvailable", result.IsDataAvailable),
+		zap.Int("totalRecordCount", result.RecordCount),
+		zap.Int("validRecordCount", validRecordCount),
+		zap.String("message", result.ValidationMessage))
+
+	return result, nil
+}
+
+// validateTimeBasedData 验证基于时间维度的数据可用性（原有逻辑）
+func (s *SugarFormulaAiService) validateTimeBasedData(ctx context.Context, modelName string, groupByDimensions []string, currentPeriodFilters, basePeriodFilters map[string]interface{}, userId string, result *DataValidationResult) (*DataValidationResult, error) {
+	global.GVA_LOG.Info("验证基于时间维度的数据可用性", zap.String("modelName", modelName))
+
 	// 构建验证查询 - 使用实际的列进行最小化查询
 	// 选择第一个分组维度作为返回列，这样可以统计记录数但不暴露敏感数据
 	returnColumns := groupByDimensions[:1] // 只取第一个维度
@@ -1971,16 +2284,14 @@ func (s *SugarFormulaAiService) validateDataAvailability(ctx context.Context, mo
 		returnColumns = []string{"*"} // 如果没有分组维度，使用通配符
 	}
 
-	// 创建验证查询请求 - 合并筛选条件
-	mergedFilters := make(map[string]interface{})
-	for k, v := range currentPeriodFilters {
-		mergedFilters[k] = v
-	}
+	// 过滤掉通配符条件，避免无效查询
+	cleanedCurrentFilters := s.filterWildcardConditions(currentPeriodFilters)
+	cleanedBaseFilters := s.filterWildcardConditions(basePeriodFilters)
 
 	validateReq := &sugarReq.SugarFormulaGetRequest{
 		ModelName:     modelName,
 		ReturnColumns: returnColumns,
-		Filters:       mergedFilters,
+		Filters:       cleanedCurrentFilters,
 	}
 
 	// 执行验证查询
@@ -2000,7 +2311,7 @@ func (s *SugarFormulaAiService) validateDataAvailability(ctx context.Context, mo
 	baseValidateReq := &sugarReq.SugarFormulaGetRequest{
 		ModelName:     modelName,
 		ReturnColumns: returnColumns,
-		Filters:       basePeriodFilters,
+		Filters:       cleanedBaseFilters,
 	}
 
 	baseValidateData, err := formulaQueryService.ExecuteGetFormula(ctx, baseValidateReq, userId)
@@ -2030,7 +2341,7 @@ func (s *SugarFormulaAiService) validateDataAvailability(ctx context.Context, mo
 		result.ValidationMessage = fmt.Sprintf("数据验证通过：本期找到%d条记录，基期找到%d条记录，可以进行贡献度分析。", result.RecordCount, baseRecordCount)
 	}
 
-	global.GVA_LOG.Info("数据可用性验证完成",
+	global.GVA_LOG.Info("基于时间维度的数据验证完成",
 		zap.Bool("isDataAvailable", result.IsDataAvailable),
 		zap.Int("currentRecordCount", result.RecordCount),
 		zap.Int("baseRecordCount", baseRecordCount),
@@ -2224,4 +2535,691 @@ func (s *SugarFormulaAiService) TestAnonymizationEffect() {
 		}()))
 
 	global.GVA_LOG.Info("匿名化效果测试完成")
+}
+
+// convertToContributionData 转换数据为anonymization_lite包需要的ContributionItem格式
+func (s *SugarFormulaAiService) convertToContributionData(currentData, baseData *sugarRes.SugarFormulaGetResponse, targetMetric string, groupByDimensions []string) []anonymization_lite.ContributionItem {
+	// 将数据按维度组合进行分组
+	currentGroups := s.groupDataByDimensions(currentData.Results, groupByDimensions, targetMetric)
+	baseGroups := s.groupDataByDimensions(baseData.Results, groupByDimensions, targetMetric)
+
+	// 计算每个维度组合的贡献度
+	var contributions []anonymization_lite.ContributionItem
+	var totalChange float64
+
+	// 获取所有唯一的维度组合
+	allKeys := s.getAllUniqueKeys(currentGroups, baseGroups)
+
+	// 第一轮：计算变化值和总变化
+	changeValues := make(map[string]float64)
+	for _, key := range allKeys {
+		currentValue := currentGroups[key]
+		baseValue := baseGroups[key]
+		changeValue := currentValue - baseValue
+
+		totalChange += changeValue
+		changeValues[key] = changeValue
+	}
+
+	// 第二轮：计算贡献度百分比和正负向判断
+	for _, key := range allKeys {
+		changeValue := changeValues[key]
+
+		// 解析维度值
+		dimensionValues := s.parseDimensionKey(key, groupByDimensions)
+
+		contributionPercent := 0.0
+		if totalChange != 0 {
+			contributionPercent = (changeValue / totalChange) * 100
+		}
+
+		// 判断是否为正向驱动因子
+		isPositiveDriver := (changeValue * totalChange) >= 0
+
+		contributions = append(contributions, anonymization_lite.ContributionItem{
+			DimensionValues:     dimensionValues,
+			ContributionPercent: contributionPercent,
+			IsPositiveDriver:    isPositiveDriver,
+		})
+	}
+
+	global.GVA_LOG.Info("数据转换完成",
+		zap.Float64("totalChange", totalChange),
+		zap.Int("contributionCount", len(contributions)))
+
+	return contributions
+}
+
+// processLiteAnonymizedAnalysis 处理lite版本的匿名化分析
+func (s *SugarFormulaAiService) processLiteAnonymizedAnalysis(ctx context.Context, modelName, targetMetric string, currentPeriodFilters, basePeriodFilters map[string]interface{}, groupByDimensions []string, userId string) (string, *anonymization_lite.LiteAnonymizationSession, error) {
+	global.GVA_LOG.Info("开始处理lite版本匿名化分析",
+		zap.String("modelName", modelName),
+		zap.String("targetMetric", targetMetric),
+		zap.Strings("groupByDimensions", groupByDimensions),
+		zap.String("userId", userId))
+
+	// 1. 并发获取本期和基期数据
+	currentData, baseData, err := s.fetchDataConcurrently(ctx, modelName, targetMetric, currentPeriodFilters, basePeriodFilters, groupByDimensions, userId)
+	if err != nil {
+		return "", nil, fmt.Errorf("并发获取数据失败: %w", err)
+	}
+
+	// 2. 计算贡献度分析
+	contributions, err := s.calculateContributions(currentData, baseData, targetMetric, groupByDimensions)
+	if err != nil {
+		return "", nil, fmt.Errorf("计算贡献度失败: %w", err)
+	}
+
+	// 3. 进行智能聚合分析，找出最佳维度组合
+	analysisResult, err := contributionAnalyzer.AnalyzeContributions(ctx, contributions, groupByDimensions)
+	if err != nil {
+		global.GVA_LOG.Warn("聚合分析失败，使用原始数据", zap.Error(err))
+		// 如果聚合分析失败，回退到原始流程
+		return s.processOriginalContributionData(ctx, contributions)
+	}
+
+	global.GVA_LOG.Info("聚合分析完成",
+		zap.String("bestDimension", analysisResult.BestAggregation.DimensionName),
+		zap.Float64("significanceScore", analysisResult.BestAggregation.SignificanceScore),
+		zap.Int("originalItems", analysisResult.OriginalItemCount),
+		zap.Int("aggregatedItems", len(analysisResult.BestAggregation.AggregatedItems)))
+
+	// 4. 转换聚合后的数据为 anonymization_lite 包需要的格式
+	contributionData := s.convertAggregatedToContributionData(analysisResult.BestAggregation.AggregatedItems)
+	if len(contributionData) == 0 {
+		return "", nil, fmt.Errorf("没有有效的聚合贡献度数据")
+	}
+
+	// 5. 使用 anonymization_lite 包进行匿名化处理
+	config := anonymization_lite.DefaultLiteConfig()
+	liteService := anonymization_lite.NewLiteAnonymizationService(config)
+
+	// 6. 处理并序列化为AI可读的文本格式，包含聚合分析摘要
+	aiDataText, session, err := liteService.ProcessAndSerialize(contributionData)
+	if err != nil {
+		return "", nil, fmt.Errorf("lite版本匿名化处理失败: %w", err)
+	}
+
+	// 7. 在AI数据前添加聚合分析摘要
+	enhancedAiDataText := s.buildEnhancedAiDataText(analysisResult, aiDataText)
+
+	global.GVA_LOG.Info("增强版lite匿名化数据处理完成",
+		zap.Int("originalDataCount", len(contributionData)),
+		zap.Int("processedDataCount", len(session.AIReadyData)),
+		zap.Int("mappingCount", len(session.ForwardMap)),
+		zap.Int("textLength", len(enhancedAiDataText)),
+		zap.String("bestAggregation", analysisResult.BestAggregation.DimensionName))
+
+	return enhancedAiDataText, session, nil
+}
+
+// LiteContributionItem 表示lite版本的贡献度分析结果（简化版）
+type LiteContributionItem struct {
+	DimensionValues     map[string]interface{} // 维度值组合
+	ContributionPercent float64                // 贡献度百分比
+	IsPositiveDriver    bool                   // 是否为正向驱动因子
+	// 移除了 CurrentValue, BaseValue, ChangeValue 字段
+}
+
+// calculateLiteContributions 计算lite版本贡献度分析（只返回贡献度）
+func (s *SugarFormulaAiService) calculateLiteContributions(currentData, baseData *sugarRes.SugarFormulaGetResponse, targetMetric string, groupByDimensions []string) ([]LiteContributionItem, error) {
+	// 将数据按维度组合进行分组
+	currentGroups := s.groupDataByDimensions(currentData.Results, groupByDimensions, targetMetric)
+	baseGroups := s.groupDataByDimensions(baseData.Results, groupByDimensions, targetMetric)
+
+	// 计算每个维度组合的贡献度
+	var contributions []LiteContributionItem
+	var totalChange float64
+
+	// 获取所有唯一的维度组合
+	allKeys := s.getAllUniqueKeys(currentGroups, baseGroups)
+
+	// 第一轮：计算变化值和总变化
+	changeValues := make(map[string]float64)
+	for _, key := range allKeys {
+		currentValue := currentGroups[key]
+		baseValue := baseGroups[key]
+		changeValue := currentValue - baseValue
+
+		totalChange += changeValue
+		changeValues[key] = changeValue
+	}
+
+	// 第二轮：计算贡献度百分比和正负向判断
+	for _, key := range allKeys {
+		changeValue := changeValues[key]
+
+		// 解析维度值
+		dimensionValues := s.parseDimensionKey(key, groupByDimensions)
+
+		contributionPercent := 0.0
+		if totalChange != 0 {
+			contributionPercent = (changeValue / totalChange) * 100
+		}
+
+		// 判断是否为正向驱动因子
+		isPositiveDriver := (changeValue * totalChange) >= 0
+
+		contributions = append(contributions, LiteContributionItem{
+			DimensionValues:     dimensionValues,
+			ContributionPercent: contributionPercent,
+			IsPositiveDriver:    isPositiveDriver,
+		})
+	}
+
+	global.GVA_LOG.Info("lite版本贡献度计算完成",
+		zap.Float64("totalChange", totalChange),
+		zap.Int("contributionCount", len(contributions)))
+
+	return contributions, nil
+}
+
+// createLiteAnonymizedSession 创建lite版本匿名化会话
+func (s *SugarFormulaAiService) createLiteAnonymizedSession(contributions []LiteContributionItem) (*AnonymizationSession, error) {
+	session := &AnonymizationSession{
+		forwardMap:  make(map[string]string),
+		reverseMap:  make(map[string]string),
+		AIReadyData: make([]map[string]interface{}, 0),
+	}
+
+	// 维度计数器，用于生成唯一代号
+	dimensionCounters := make(map[string]int)
+	valueCounters := make(map[string]int)
+
+	global.GVA_LOG.Info("开始创建lite版本匿名化会话", zap.Int("contributionCount", len(contributions)))
+
+	// 处理每个贡献项
+	for i, contribution := range contributions {
+		aiItem := make(map[string]interface{})
+
+		// 处理维度值的匿名化
+		for dimName, dimValue := range contribution.DimensionValues {
+			anonymizedDimName := s.getOrCreateAnonymizedDimension(session, dimName, dimensionCounters)
+			anonymizedDimValue := s.getOrCreateAnonymizedValue(session, dimName, fmt.Sprintf("%v", dimValue), valueCounters)
+
+			aiItem[anonymizedDimName] = anonymizedDimValue
+		}
+
+		// 添加lite版本的简化数值数据（只有贡献度）
+		aiItem["contribution_percent"] = s.anonymizeLiteNumericValue(contribution.ContributionPercent)
+		aiItem["is_positive_driver"] = contribution.IsPositiveDriver
+
+		session.AIReadyData = append(session.AIReadyData, aiItem)
+
+		// 记录匿名化进度
+		if i%10 == 0 || i == len(contributions)-1 {
+			global.GVA_LOG.Debug("lite版本匿名化进度",
+				zap.Int("processed", i+1),
+				zap.Int("total", len(contributions)),
+				zap.Int("currentMappings", len(session.forwardMap)))
+		}
+	}
+
+	global.GVA_LOG.Info("lite版本匿名化会话创建完成",
+		zap.Int("forwardMapSize", len(session.forwardMap)),
+		zap.Int("reverseMapSize", len(session.reverseMap)),
+		zap.Int("aiDataSize", len(session.AIReadyData)))
+
+	return session, nil
+}
+
+// anonymizeLiteNumericValue 对lite版本数值进行轻微脱敏处理
+func (s *SugarFormulaAiService) anonymizeLiteNumericValue(value float64) float64 {
+	// lite版本使用更轻微的脱敏策略
+	// 对贡献度百分比添加小幅随机扰动（±2%以内）
+	maxPerturbation := 2.0
+	perturbation := (rand.Float64() - 0.5) * 2 * maxPerturbation
+	anonymizedValue := value + perturbation
+
+	// 确保百分比在合理范围内
+	if anonymizedValue > 100.0 {
+		anonymizedValue = 100.0
+	} else if anonymizedValue < -100.0 {
+		anonymizedValue = -100.0
+	}
+
+	// 保留2位小数
+	anonymizedValue = math.Round(anonymizedValue*100) / 100
+
+	return anonymizedValue
+}
+
+// serializeLiteAnonymizedDataToText 将lite版本匿名化数据序列化为文本格式
+func (s *SugarFormulaAiService) serializeLiteAnonymizedDataToText(data []map[string]interface{}) (string, error) {
+	if len(data) == 0 {
+		return "", errors.New("lite版本匿名化数据为空")
+	}
+
+	var builder strings.Builder
+	builder.WriteString("【简化匿名化贡献度分析数据】\n")
+	builder.WriteString("说明：以下数据已进行简化匿名化处理，专注于贡献度分析\n\n")
+
+	// 添加数据列说明
+	builder.WriteString("数据字段说明：\n")
+	builder.WriteString("- 维度代号（D01, D02等）：表示业务维度（如区域、产品等）\n")
+	builder.WriteString("- 值代号（D01_V01, D01_V02等）：表示具体的维度值\n")
+	builder.WriteString("- contribution_percent：贡献度百分比\n")
+	builder.WriteString("- is_positive_driver：是否为正向驱动因子\n\n")
+
+	builder.WriteString("数据内容：\n")
+	for i, item := range data {
+		builder.WriteString(fmt.Sprintf("项目 %d:\n", i+1))
+
+		// 先输出维度信息
+		for key, value := range item {
+			if strings.HasPrefix(key, "D") && !strings.Contains(key, "_") {
+				builder.WriteString(fmt.Sprintf("  %s: %v\n", key, value))
+			}
+		}
+
+		// 再输出分析数据
+		if cp, ok := item["contribution_percent"]; ok {
+			builder.WriteString(fmt.Sprintf("  贡献度: %.2f%%\n", cp))
+		}
+		if ipd, ok := item["is_positive_driver"]; ok {
+			builder.WriteString(fmt.Sprintf("  正向驱动: %v\n", ipd))
+		}
+
+		builder.WriteString("\n")
+	}
+
+	global.GVA_LOG.Info("lite版本匿名化数据序列化完成",
+		zap.Int("dataCount", len(data)),
+		zap.Int("textLength", len(builder.String())))
+
+	return builder.String(), nil
+}
+
+// decodeLiteAIResponseWithSession 使用lite版本的匿名化会话解码AI响应
+func (s *SugarFormulaAiService) decodeLiteAIResponseWithSession(session *anonymization_lite.LiteAnonymizationSession, aiResponse string) (string, error) {
+	if aiResponse == "" {
+		return "", nil
+	}
+
+	if session == nil {
+		global.GVA_LOG.Warn("匿名化会话为空，直接返回原始响应")
+		return aiResponse, nil
+	}
+
+	global.GVA_LOG.Info("开始lite版本AI响应解码",
+		zap.Int("originalLength", len(aiResponse)),
+		zap.Int("mappingCount", len(session.ReverseMap)))
+
+	// 使用lite版本的解码功能
+	decodedResult, err := session.DecodeAIResponse(aiResponse)
+	if err != nil {
+		global.GVA_LOG.Error("lite版本解码失败", zap.Error(err))
+		return aiResponse, err
+	}
+
+	global.GVA_LOG.Info("lite版本AI响应解码完成",
+		zap.Int("originalLength", len(aiResponse)),
+		zap.Int("decodedLength", len(decodedResult)))
+
+	return decodedResult, nil
+}
+
+// processOriginalContributionData 处理原始贡献度数据（回退方案）
+func (s *SugarFormulaAiService) processOriginalContributionData(ctx context.Context, contributions []ContributionItem) (string, *anonymization_lite.LiteAnonymizationSession, error) {
+	global.GVA_LOG.Info("使用原始贡献度数据处理流程")
+
+	// 直接转换原始贡献度数据
+	var contributionData []anonymization_lite.ContributionItem
+	for _, contrib := range contributions {
+		contributionItem := anonymization_lite.ContributionItem{
+			DimensionValues:     contrib.DimensionValues,
+			ContributionPercent: contrib.ContributionPercent,
+			IsPositiveDriver:    contrib.IsPositiveDriver,
+		}
+		contributionData = append(contributionData, contributionItem)
+	}
+
+	if len(contributionData) == 0 {
+		return "", nil, fmt.Errorf("没有有效的原始贡献度数据")
+	}
+
+	// 使用 anonymization_lite 包进行匿名化处理
+	config := anonymization_lite.DefaultLiteConfig()
+	liteService := anonymization_lite.NewLiteAnonymizationService(config)
+
+	// 处理并序列化为AI可读的文本格式
+	aiDataText, session, err := liteService.ProcessAndSerialize(contributionData)
+	if err != nil {
+		return "", nil, fmt.Errorf("原始数据匿名化处理失败: %w", err)
+	}
+
+	return aiDataText, session, nil
+}
+
+// convertAggregatedToContributionData 将聚合后的数据转换为 anonymization_lite 包需要的格式
+func (s *SugarFormulaAiService) convertAggregatedToContributionData(aggregatedItems []AggregatedItem) []anonymization_lite.ContributionItem {
+	var contributionData []anonymization_lite.ContributionItem
+
+	for _, item := range aggregatedItems {
+		contributionItem := anonymization_lite.ContributionItem{
+			DimensionValues:     item.DimensionValues,
+			ContributionPercent: item.ContributionPercent,
+			IsPositiveDriver:    item.IsPositiveDriver,
+		}
+		contributionData = append(contributionData, contributionItem)
+	}
+
+	global.GVA_LOG.Info("聚合数据转换完成",
+		zap.Int("aggregatedItemCount", len(aggregatedItems)),
+		zap.Int("contributionDataCount", len(contributionData)))
+
+	return contributionData
+}
+
+// buildEnhancedAiDataText 构建增强的AI数据文本，包含聚合分析摘要
+func (s *SugarFormulaAiService) buildEnhancedAiDataText(analysisResult *ContributionAnalysisResult, aiDataText string) string {
+	var builder strings.Builder
+
+	// 添加聚合分析摘要
+	builder.WriteString("【智能聚合分析结果】\n")
+	builder.WriteString("说明：以下数据已经过智能聚合分析，突出显示最关键的驱动因子\n\n")
+
+	// 添加最佳聚合维度信息
+	builder.WriteString(fmt.Sprintf("🎯 **最佳分析维度**: %s (显著性得分: %.1f)\n",
+		analysisResult.BestAggregation.DimensionName, analysisResult.BestAggregation.SignificanceScore))
+	builder.WriteString(fmt.Sprintf("📊 **数据聚合效果**: 从%d个明细项目聚合为%d个关键项目\n",
+		analysisResult.OriginalItemCount, len(analysisResult.BestAggregation.AggregatedItems)))
+	builder.WriteString(fmt.Sprintf("💡 **聚合摘要**: %s\n\n", analysisResult.BestAggregation.Summary))
+
+	// 添加关键洞察
+	if len(analysisResult.KeyInsights) > 0 {
+		builder.WriteString("🔍 **关键洞察**:\n")
+		for i, insight := range analysisResult.KeyInsights {
+			if i < 2 { // 只显示前2个最重要的洞察
+				builder.WriteString(fmt.Sprintf("- %s: %s\n", insight.Title, insight.Description))
+			}
+		}
+		builder.WriteString("\n")
+	}
+
+	// 添加AI分析指导
+	builder.WriteString("📋 **AI分析指导**:\n")
+	builder.WriteString("- 重点关注聚合后的关键驱动因子，而非明细项目\n")
+	builder.WriteString("- 优先分析贡献度最高的维度组合\n")
+	builder.WriteString("- 用业务语言描述变化，突出主导因子的影响\n")
+	builder.WriteString("- 如有整体趋势，请在开头概括总体方向\n\n")
+
+	// 添加推荐的输出格式
+	if len(analysisResult.BestAggregation.AggregatedItems) > 0 {
+		// 找出最显著的聚合项目作为示例
+		var maxItem *AggregatedItem
+		maxAbsContrib := 0.0
+		for i := range analysisResult.BestAggregation.AggregatedItems {
+			if math.Abs(analysisResult.BestAggregation.AggregatedItems[i].ContributionPercent) > maxAbsContrib {
+				maxAbsContrib = math.Abs(analysisResult.BestAggregation.AggregatedItems[i].ContributionPercent)
+				maxItem = &analysisResult.BestAggregation.AggregatedItems[i]
+			}
+		}
+
+		if maxItem != nil {
+			direction := "增长"
+			if maxItem.ContributionPercent < 0 {
+				direction = "下降"
+			}
+
+			var valueDesc []string
+			for _, dim := range analysisResult.BestAggregation.DimensionCombination {
+				if value, exists := maxItem.DimensionValues[dim]; exists {
+					valueDesc = append(valueDesc, fmt.Sprintf("%v", value))
+				}
+			}
+			valueDescStr := strings.Join(valueDesc, "")
+
+			builder.WriteString("📝 **推荐输出格式**:\n")
+			builder.WriteString(fmt.Sprintf("- 示例: \"%s%s贡献最显著\" 或 \"各项目普遍%s，%s增幅最大\"\n\n",
+				valueDescStr, direction, direction, valueDescStr))
+		}
+	}
+
+	// 分隔线
+	builder.WriteString("=" + strings.Repeat("=", 50) + "\n\n")
+
+	// 添加原始匿名化数据
+	builder.WriteString(aiDataText)
+
+	return builder.String()
+}
+
+// processAdvancedContributionAnalysis 使用增强版分析器进行智能贡献度分析
+func (s *SugarFormulaAiService) processAdvancedContributionAnalysis(ctx context.Context, modelName, targetMetric string, currentPeriodFilters, basePeriodFilters map[string]interface{}, groupByDimensions []string, userId string) (string, *anonymization_lite.LiteAnonymizationSession, error) {
+	global.GVA_LOG.Info("开始使用增强版分析器进行智能贡献度分析",
+		zap.String("modelName", modelName),
+		zap.String("targetMetric", targetMetric),
+		zap.Strings("groupByDimensions", groupByDimensions),
+		zap.String("userId", userId))
+
+	// 1. 并发获取本期和基期数据
+	currentData, baseData, err := s.fetchDataConcurrently(ctx, modelName, targetMetric, currentPeriodFilters, basePeriodFilters, groupByDimensions, userId)
+	if err != nil {
+		return "", nil, fmt.Errorf("并发获取数据失败: %w", err)
+	}
+
+	// 2. 计算基础贡献度分析
+	contributions, err := s.calculateContributions(currentData, baseData, targetMetric, groupByDimensions)
+	if err != nil {
+		return "", nil, fmt.Errorf("计算贡献度失败: %w", err)
+	}
+
+	// 3. 使用增强版分析器进行智能下钻分析
+	if s.advancedAnalyzer != nil {
+		global.GVA_LOG.Info("使用增强版分析器进行智能下钻分析")
+
+		// 构建分析请求
+		analysisRequest := &advanced_contribution_analyzer.AnalysisRequest{
+			ModelName:            modelName,
+			Metric:               targetMetric,
+			Dimensions:           groupByDimensions,
+			CurrentPeriodFilters: currentPeriodFilters,
+			BasePeriodFilters:    basePeriodFilters,
+			IsYearEndComparison:  s.isYearEndComparisonModel(modelName, targetMetric),
+			RawContributions:     s.convertToAdvancedContributions(contributions),
+			TotalChange:          s.calculateTotalChange(contributions),
+		}
+
+		// 执行增强版分析
+		analysisResponse, err := s.advancedAnalyzer.PerformAdvancedAnalysis(ctx, analysisRequest)
+		if err != nil {
+			global.GVA_LOG.Warn("增强版分析器分析失败，回退到原始流程", zap.Error(err))
+			// 回退到原始流程
+			return s.processOriginalContributionData(ctx, contributions)
+		}
+
+		if !analysisResponse.Success {
+			global.GVA_LOG.Warn("增强版分析器返回失败结果，回退到原始流程", zap.String("error", analysisResponse.ErrorMessage))
+			return s.processOriginalContributionData(ctx, contributions)
+		}
+
+		global.GVA_LOG.Info("增强版智能下钻分析完成",
+			zap.Int("analyzedLevels", analysisResponse.AnalysisMetrics.AnalyzedLevels),
+			zap.Int("optimalLevel", analysisResponse.DrillDownResult.OptimalLevel),
+			zap.Int64("processingTimeMs", analysisResponse.AnalysisMetrics.ProcessingTimeMs))
+
+		// 4. 转换优化后的数据为 anonymization_lite 包需要的格式
+		contributionData := s.convertDrillDownToContributionData(analysisResponse.DrillDownResult.TopCombinations)
+		if len(contributionData) == 0 {
+			return "", nil, fmt.Errorf("没有有效的优化贡献度数据")
+		}
+
+		// 5. 使用 anonymization_lite 包进行匿名化处理
+		config := anonymization_lite.DefaultLiteConfig()
+		liteService := anonymization_lite.NewLiteAnonymizationService(config)
+
+		// 6. 处理并序列化为AI可读的文本格式
+		aiDataText, session, err := liteService.ProcessAndSerialize(contributionData)
+		if err != nil {
+			return "", nil, fmt.Errorf("增强版匿名化处理失败: %w", err)
+		}
+
+		// 7. 构建增强的AI数据文本，包含智能分析摘要
+		enhancedAiDataText := s.buildAdvancedAnalysisText(analysisResponse, aiDataText)
+
+		global.GVA_LOG.Info("增强版分析器处理完成",
+			zap.Int("originalDataCount", len(contributionData)),
+			zap.Int("processedDataCount", len(session.AIReadyData)),
+			zap.Int("mappingCount", len(session.ForwardMap)),
+			zap.Int("textLength", len(enhancedAiDataText)))
+
+		return enhancedAiDataText, session, nil
+	}
+
+	// 如果增强版分析器不可用，回退到原始流程
+	global.GVA_LOG.Warn("增强版分析器不可用，使用原始贡献度分析流程")
+	return s.processOriginalContributionData(ctx, contributions)
+}
+
+// convertToAdvancedContributions 转换为增强版分析器需要的数据格式
+func (s *SugarFormulaAiService) convertToAdvancedContributions(contributions []ContributionItem) []*advanced_contribution_analyzer.DimensionCombination {
+	var advancedContributions []*advanced_contribution_analyzer.DimensionCombination
+
+	for _, contrib := range contributions {
+		// 构建维度值列表
+		var values []advanced_contribution_analyzer.DimensionValue
+		for dimName, dimValue := range contrib.DimensionValues {
+			value := advanced_contribution_analyzer.DimensionValue{
+				Dimension: dimName,
+				Value:     fmt.Sprintf("%v", dimValue),
+				Label:     fmt.Sprintf("%v", dimValue), // 使用原始值作为标签
+			}
+			values = append(values, value)
+		}
+
+		advancedContrib := &advanced_contribution_analyzer.DimensionCombination{
+			Values:        values,
+			Contribution:  contrib.ContributionPercent,
+			AbsoluteValue: math.Abs(contrib.ChangeValue),
+			Count:         1, // 每个贡献项代表一个组合
+		}
+
+		advancedContributions = append(advancedContributions, advancedContrib)
+	}
+
+	global.GVA_LOG.Info("数据格式转换完成",
+		zap.Int("originalCount", len(contributions)),
+		zap.Int("convertedCount", len(advancedContributions)))
+
+	return advancedContributions
+}
+
+// calculateTotalChange 计算总变化值
+func (s *SugarFormulaAiService) calculateTotalChange(contributions []ContributionItem) float64 {
+	var totalChange float64
+	for _, contrib := range contributions {
+		totalChange += contrib.ChangeValue
+	}
+	return totalChange
+}
+
+// convertDrillDownToContributionData 将下钻结果转换为 anonymization_lite 包需要的格式
+func (s *SugarFormulaAiService) convertDrillDownToContributionData(topCombinations []*advanced_contribution_analyzer.DimensionCombination) []anonymization_lite.ContributionItem {
+	var contributionData []anonymization_lite.ContributionItem
+
+	for _, item := range topCombinations {
+		// 重建维度值映射
+		dimensionValues := make(map[string]interface{})
+		for _, value := range item.Values {
+			dimensionValues[value.Dimension] = value.Value
+		}
+
+		contributionItem := anonymization_lite.ContributionItem{
+			DimensionValues:     dimensionValues,
+			ContributionPercent: item.Contribution,
+			IsPositiveDriver:    item.Contribution >= 0, // 简单的正负判断
+		}
+		contributionData = append(contributionData, contributionItem)
+	}
+
+	global.GVA_LOG.Info("下钻结果转换完成",
+		zap.Int("topCombinationCount", len(topCombinations)),
+		zap.Int("contributionDataCount", len(contributionData)))
+
+	return contributionData
+}
+
+// buildAdvancedAnalysisText 构建增强版分析文本，包含智能分析摘要
+func (s *SugarFormulaAiService) buildAdvancedAnalysisText(analysisResponse *advanced_contribution_analyzer.AnalysisResponse, aiDataText string) string {
+	var builder strings.Builder
+
+	// 添加智能分析摘要
+	builder.WriteString("【增强版智能贡献度分析结果】\n")
+	builder.WriteString("说明：以下数据已经过智能下钻分析，基于区分度计算优化维度选择\n\n")
+
+	// 添加分析指标信息
+	if analysisResponse.AnalysisMetrics != nil {
+		builder.WriteString(fmt.Sprintf("🎯 **智能分析指标**:\n"))
+		builder.WriteString(fmt.Sprintf("- 分析层级数: %d\n", analysisResponse.AnalysisMetrics.AnalyzedLevels))
+		builder.WriteString(fmt.Sprintf("- 最优区分度: %.2f\n", analysisResponse.AnalysisMetrics.OptimalDiscrimination))
+		builder.WriteString(fmt.Sprintf("- 处理时间: %dms\n", analysisResponse.AnalysisMetrics.ProcessingTimeMs))
+		if analysisResponse.AnalysisMetrics.StopReason != "" {
+			builder.WriteString(fmt.Sprintf("- 停止原因: %s\n", analysisResponse.AnalysisMetrics.StopReason))
+		}
+		builder.WriteString("\n")
+	}
+
+	// 添加数据质量信息
+	if analysisResponse.DataQualityReport != nil {
+		builder.WriteString(fmt.Sprintf("📊 **数据质量评估**: %.1f分", analysisResponse.DataQualityReport.QualityScore))
+		if analysisResponse.DataQualityReport.QualityScore >= 90 {
+			builder.WriteString(" (优秀)\n")
+		} else if analysisResponse.DataQualityReport.QualityScore >= 70 {
+			builder.WriteString(" (良好)\n")
+		} else {
+			builder.WriteString(" (有待改善)\n")
+		}
+		builder.WriteString("\n")
+	}
+
+	// 添加业务洞察
+	if len(analysisResponse.BusinessInsights) > 0 {
+		builder.WriteString("🔍 **智能业务洞察**:\n")
+		for i, insight := range analysisResponse.BusinessInsights {
+			if i < 3 { // 显示前3个最重要的洞察
+				builder.WriteString(fmt.Sprintf("- %s\n", insight))
+			}
+		}
+		builder.WriteString("\n")
+	}
+
+	// 添加增强摘要
+	if analysisResponse.EnhancedSummary != "" {
+		builder.WriteString(fmt.Sprintf("💡 **分析摘要**: %s\n\n", analysisResponse.EnhancedSummary))
+	}
+
+	// 添加AI分析指导
+	builder.WriteString("📋 **AI分析指导**:\n")
+	builder.WriteString("- 重点关注经过智能下钻优化的关键驱动因子\n")
+	builder.WriteString("- 优先分析区分度最高的维度组合\n")
+	builder.WriteString("- 用业务友好的语言描述变化，避免技术术语\n")
+	builder.WriteString("- 突出最显著的贡献因子，简化表述\n\n")
+
+	// 添加推荐的输出格式
+	if analysisResponse.DrillDownResult != nil && len(analysisResponse.DrillDownResult.TopCombinations) > 0 {
+		topCombo := analysisResponse.DrillDownResult.TopCombinations[0]
+		direction := "增长"
+		if topCombo.Contribution < 0 {
+			direction = "下降"
+		}
+
+		var valueDesc []string
+		for _, value := range topCombo.Values {
+			valueDesc = append(valueDesc, value.Label)
+		}
+		valueDescStr := strings.Join(valueDesc, "")
+
+		builder.WriteString("📝 **推荐输出格式**:\n")
+		builder.WriteString(fmt.Sprintf("- 示例: \"%s%s贡献最显著\" 或 \"各项目普遍%s，%s变化最大\"\n\n",
+			valueDescStr, direction, direction, valueDescStr))
+	}
+
+	// 分隔线
+	builder.WriteString("=" + strings.Repeat("=", 60) + "\n\n")
+
+	// 添加匿名化数据
+	builder.WriteString(aiDataText)
+
+	return builder.String()
 }

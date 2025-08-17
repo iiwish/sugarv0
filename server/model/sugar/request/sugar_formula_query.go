@@ -13,6 +13,7 @@ type SugarFormulaGetRequest struct {
 	ModelName     string                 `json:"modelName" binding:"required"`     // 语义模型名称
 	ReturnColumns []string               `json:"returnColumns" binding:"required"` // 返回列名列表
 	Filters       map[string]interface{} `json:"filters"`                          // 筛选条件键值对
+	GroupBy       []string               `json:"groupBy"`                          // 分组字段列表，用于聚合查询
 }
 
 // ValidateCalcMethod 验证计算方式是否有效
