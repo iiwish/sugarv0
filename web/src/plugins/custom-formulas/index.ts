@@ -138,6 +138,8 @@ export class CustomFormulasPlugin extends BasePlugin {
       
       if (enabledCategories.includes('ai')) {
         await this.registerFormulaCategory('ai', aiFormulas, formulaEngine)
+        // 启动AI公式的并发监控
+        this.startConcurrencyMonitoring(10000) // 每10秒监控一次
       }
       
       if (enabledCategories.includes('db')) {
@@ -165,12 +167,27 @@ export class CustomFormulasPlugin extends BasePlugin {
       try {
         // 根据公式是否异步，调用不同的注册方法
         if (formula.config?.isAsync) {
-          // 直接注册原始的异步函数
-          // Univer会自动处理Promise，不需要包装器
+          // 对于异步公式，确保它们能够真正并发执行
+          // 创建一个包装函数来确保每个调用都是独立的
+          const asyncWrapper = async (...args: any[]) => {
+            try {
+              // 直接调用原始实现，让每个调用都独立执行
+              return await formula.implementation(...args)
+            } catch (error) {
+              this.context?.logger.error(`异步公式 ${formula.name} 执行失败:`, error)
+              throw error
+            }
+          }
+          
           formulaEngine.registerAsyncFunction(
             formula.name,
-            formula.implementation,
-            formula.config // 传递完整的配置对象，包含参数信息
+            asyncWrapper,
+            {
+              ...formula.config,
+              // 确保异步公式配置正确
+              concurrent: true, // 明确标记支持并发
+              timeout: 300000   // 5分钟超时
+            }
           )
         } else {
           formulaEngine.registerFunction(

@@ -17,21 +17,36 @@ interface PendingRequest {
   timestamp: number
 }
 
+interface QueuedRequest {
+  resolve: () => void
+  cacheKey: string
+  priority: number
+  timestamp: number
+}
+
 class AIFormulaManager {
   private cache = new Map<string, CacheEntry>()
   private pendingRequests = new Map<string, PendingRequest>()
-  private maxConcurrentRequests = 10 // 增加并发数量
+  private maxConcurrentRequests = 15 // 增加并发数量以支持更好的并发性能
   private currentRequests = 0
-  private requestQueue: Array<() => void> = []
+  private requestQueue: QueuedRequest[] = []
   private defaultCacheTTL = 5 * 60 * 1000 // 5分钟缓存
   private requestTimeout = 300000 // 5分钟超时
   private requestPriority = new Map<string, number>() // 请求优先级管理
+  private queueProcessingLock = false // 防止队列处理竞态条件
 
   /**
    * 生成缓存键
    */
   private generateCacheKey(endpoint: string, data: any): string {
     return `${endpoint}:${JSON.stringify(data)}`
+  }
+
+  /**
+   * 公开的生成缓存键方法，供外部使用
+   */
+  public generateCacheKeyPublic(endpoint: string, data: any): string {
+    return this.generateCacheKey(endpoint, data)
   }
 
   /**
@@ -76,15 +91,26 @@ class AIFormulaManager {
     if (pendingRequest) {
       // 检查请求是否超时
       if (Date.now() - pendingRequest.timestamp < this.requestTimeout) {
-        return await pendingRequest.promise
+        try {
+          return await pendingRequest.promise
+        } catch (error) {
+          // 如果等待的请求失败，清理并重新尝试
+          this.pendingRequests.delete(cacheKey)
+          // 继续执行新请求
+        }
       } else {
         // 清理超时的请求
         this.pendingRequests.delete(cacheKey)
       }
     }
 
-    // 创建新的请求Promise
+    // 创建新的请求Promise，添加更好的错误处理
     const requestPromise = this.makeRequest(endpoint, requestData, cacheKey, cacheTTL || this.defaultCacheTTL)
+      .catch(error => {
+        // 确保即使请求失败也要清理pendingRequests
+        this.pendingRequests.delete(cacheKey)
+        throw error
+      })
     
     // 记录正在进行的请求
     this.pendingRequests.set(cacheKey, {
@@ -110,13 +136,21 @@ class AIFormulaManager {
       await new Promise<void>((resolve) => {
         // 设置请求优先级（AI公式优先级较低，避免阻塞其他公式）
         const priority = this.requestPriority.get(cacheKey) || 1
-        this.requestQueue.push(resolve)
+        const queuedRequest: QueuedRequest = {
+          resolve,
+          cacheKey,
+          priority,
+          timestamp: Date.now()
+        }
         
-        // 按优先级排序队列（优先级高的先执行）
+        this.requestQueue.push(queuedRequest)
+        
+        // 按优先级排序队列（优先级高的先执行，时间早的优先）
         this.requestQueue.sort((a, b) => {
-          const aPriority = this.requestPriority.get(a.toString()) || 1
-          const bPriority = this.requestPriority.get(b.toString()) || 1
-          return bPriority - aPriority
+          if (a.priority !== b.priority) {
+            return b.priority - a.priority // 优先级高的先执行
+          }
+          return a.timestamp - b.timestamp // 相同优先级按时间排序
         })
       })
     }
@@ -185,13 +219,36 @@ class AIFormulaManager {
       this.requestPriority.delete(cacheKey)
       
       // 处理队列中的下一个请求
-      if (this.requestQueue.length > 0) {
-        const nextResolve = this.requestQueue.shift()
-        if (nextResolve) {
-          // 使用 setTimeout 确保异步执行，避免阻塞当前请求
-          setTimeout(() => nextResolve(), 0)
-        }
+      this.processNextQueuedRequest()
+    }
+  }
+
+  /**
+   * 处理队列中的下一个请求
+   */
+  private processNextQueuedRequest(): void {
+    if (this.queueProcessingLock || this.requestQueue.length === 0) {
+      return
+    }
+
+    this.queueProcessingLock = true
+    
+    try {
+      const nextRequest = this.requestQueue.shift()
+      if (nextRequest) {
+        // 使用 setTimeout 确保异步执行，避免阻塞当前请求
+        setTimeout(() => {
+          nextRequest.resolve()
+          this.queueProcessingLock = false
+          // 递归处理下一个请求
+          this.processNextQueuedRequest()
+        }, 0)
+      } else {
+        this.queueProcessingLock = false
       }
+    } catch (error) {
+      this.queueProcessingLock = false
+      console.error('处理队列请求时发生错误:', error)
     }
   }
 
@@ -223,17 +280,57 @@ class AIFormulaManager {
   /**
    * 获取缓存统计信息
    */
-  getCacheStats(): { size: number; pendingRequests: number; currentRequests: number } {
+  getCacheStats(): { size: number; pendingRequests: number; currentRequests: number; queuedRequests: number } {
     return {
       size: this.cache.size,
       pendingRequests: this.pendingRequests.size,
-      currentRequests: this.currentRequests
+      currentRequests: this.currentRequests,
+      queuedRequests: this.requestQueue.length
+    }
+  }
+
+  /**
+   * 清理超时的待处理请求
+   */
+  private cleanupTimeoutRequests(): void {
+    const now = Date.now()
+    const timeoutKeys: string[] = []
+    
+    this.pendingRequests.forEach((request, key) => {
+      if (now - request.timestamp >= this.requestTimeout) {
+        timeoutKeys.push(key)
+      }
+    })
+    
+    timeoutKeys.forEach(key => {
+      this.pendingRequests.delete(key)
+    })
+    
+    if (timeoutKeys.length > 0) {
+      console.warn(`清理了 ${timeoutKeys.length} 个超时的AI请求`)
+    }
+  }
+
+  /**
+   * 定期清理超时请求和过期缓存
+   */
+  startPeriodicCleanup(intervalMs: number = 60000): () => void {
+    const cleanupInterval = setInterval(() => {
+      this.cleanupTimeoutRequests()
+      this.cleanExpiredCache()
+    }, intervalMs)
+
+    return () => {
+      clearInterval(cleanupInterval)
     }
   }
 }
 
 // 全局AI公式管理器实例
 const aiFormulaManager = new AIFormulaManager()
+
+// 启动定期清理
+aiFormulaManager.startPeriodicCleanup(60000) // 每分钟清理一次
 
 /**
  * AI.FETCH 函数的中文本地化
@@ -396,21 +493,27 @@ export const aiFormulas = [
           requestData.dataRange = dataRangeStr
         }
 
+        // 设置较高的优先级以确保AI公式能够及时执行
+        const cacheKey = aiFormulaManager.generateCacheKeyPublic('/api/sugarFormulaQuery/executeAiFetch', requestData)
+        aiFormulaManager.setRequestPriority(cacheKey, 5) // 设置中等优先级
+
         try {
-            const result = await aiFormulaManager.executeAIRequest(
-                '/api/sugarFormulaQuery/executeAiFetch',
-                requestData
-            );
-            return processAIResult(result);
+          const result = await aiFormulaManager.executeAIRequest(
+            '/api/sugarFormulaQuery/executeAiFetch',
+            requestData
+          )
+          return processAIResult(result)
         } catch (error) {
-            console.error('AIFETCH: 执行异常:', error);
-            if (error.message.includes('超时')) {
-                return '#TIMEOUT!';
-            } else if (error.message.includes('中止')) {
-                return '#ABORTED!';
-            } else {
-                return '#ERROR!';
-            }
+          console.error('AIFETCH: 执行异常:', error)
+          if (error.message.includes('超时')) {
+            return '#TIMEOUT!'
+          } else if (error.message.includes('中止')) {
+            return '#ABORTED!'
+          } else if (error.message.includes('网络')) {
+            return '#NETWORK!'
+          } else {
+            return '#ERROR!'
+          }
         }
       } catch (error) {
         console.error('AIFETCH: 同步异常:', error)
@@ -503,21 +606,27 @@ export const aiFormulas = [
           description: descriptionStr,
         }
 
+        // 设置较高的优先级以确保AI公式能够及时执行
+        const cacheKey = aiFormulaManager.generateCacheKeyPublic('/api/sugarFormulaQuery/executeAiExplainRange', requestData)
+        aiFormulaManager.setRequestPriority(cacheKey, 5) // 设置中等优先级
+
         try {
-            const result = await aiFormulaManager.executeAIRequest(
-                '/api/sugarFormulaQuery/executeAiExplainRange',
-                requestData
-            );
-            return processAIResult(result);
+          const result = await aiFormulaManager.executeAIRequest(
+            '/api/sugarFormulaQuery/executeAiExplainRange',
+            requestData
+          )
+          return processAIResult(result)
         } catch (error) {
-            console.error('AIEXPLAINRANGE: 执行异常:', error);
-            if (error.message.includes('超时')) {
-                return '#TIMEOUT!';
-            } else if (error.message.includes('中止')) {
-                return '#ABORTED!';
-            } else {
-                return '#ERROR!';
-            }
+          console.error('AIEXPLAINRANGE: 执行异常:', error)
+          if (error.message.includes('超时')) {
+            return '#TIMEOUT!'
+          } else if (error.message.includes('中止')) {
+            return '#ABORTED!'
+          } else if (error.message.includes('网络')) {
+            return '#NETWORK!'
+          } else {
+            return '#ERROR!'
+          }
         }
       } catch (error) {
         console.error('AIEXPLAINRANGE: 同步异常:', error)
