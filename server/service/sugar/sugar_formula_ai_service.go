@@ -204,39 +204,6 @@ func (s *SugarFormulaAiService) ExecuteAiExplainFormula(ctx context.Context, req
 	return sugarRes.NewAiSuccessResponseWithText(response), nil
 }
 
-// getAgentByName 根据名称获取Agent
-func (s *SugarFormulaAiService) getAgentByName(ctx context.Context, agentName, userId string) (*sugar.SugarAgents, error) {
-	var agent sugar.SugarAgents
-
-	// 获取用户所属团队
-	var teamIds []string
-	err := global.GVA_DB.Table("sugar_team_members").Where("user_id = ?", userId).Pluck("team_id", &teamIds).Error
-	if err != nil {
-		return nil, errors.New("获取用户团队信息失败")
-	}
-	if len(teamIds) == 0 {
-		return nil, errors.New("用户未加入任何团队")
-	}
-
-	// 获取团队共享表信息
-	var teamAgentIds []string
-	err = global.GVA_DB.Table("sugar_agent_shares").Where("team_id in ? AND deleted_at is null", teamIds).Pluck("agent_id", &teamAgentIds).Error
-	if err != nil {
-		return nil, errors.New("获取用户团队Agent信息失败")
-	}
-	if len(teamAgentIds) == 0 {
-		return nil, errors.New("用户团队没有Agent权限")
-	}
-
-	// 查找Agent
-	err = global.GVA_DB.Where("name = ? AND team_id IN ?", agentName, teamIds).First(&agent).Error
-	if err != nil {
-		return nil, errors.New("Agent不存在或无权访问: " + agentName)
-	}
-
-	return &agent, nil
-}
-
 // getAiExplainPrompt 获取AIEXPLAIN的提示词配置
 func (s *SugarFormulaAiService) getAiExplainPrompt() (*sugar.SugarAgents, error) {
 	var agent sugar.SugarAgents

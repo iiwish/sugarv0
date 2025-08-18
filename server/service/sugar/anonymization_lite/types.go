@@ -36,12 +36,23 @@ type ContributionItem struct {
 	RelativeImportance float64 `json:"relative_importance"` // 相对重要性（0-100，基于贡献度绝对值的排名百分位）
 }
 
+// DimensionSemanticInfo 维度语义信息
+type DimensionSemanticInfo struct {
+	AnonymizedName string `json:"anonymized_name"` // 匿名化后的维度名称
+	OriginalName   string `json:"original_name"`   // 原始维度名称
+	SemanticType   string `json:"semantic_type"`   // 语义类型：地区、产品、时间、部门等
+	Description    string `json:"description"`     // 维度描述，用于AI理解
+}
+
 // LiteAnonymizationSession 简化的匿名化会话
 type LiteAnonymizationSession struct {
 	// 映射关系
 	ForwardMap  map[string]string        `json:"forward_map"`   // 原始 -> 匿名
 	ReverseMap  map[string]string        `json:"reverse_map"`   // 匿名 -> 原始
 	AIReadyData []map[string]interface{} `json:"ai_ready_data"` // AI可读数据
+
+	// 新增：维度语义信息
+	DimensionSemantics map[string]*DimensionSemanticInfo `json:"dimension_semantics"` // 维度语义映射
 
 	// 会话信息
 	Config    *LiteConfig `json:"config"`

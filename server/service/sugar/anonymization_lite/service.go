@@ -38,10 +38,11 @@ func (s *LiteAnonymizationService) ProcessContributionData(contributions []Contr
 
 	// 创建匿名化会话
 	session := &LiteAnonymizationSession{
-		ForwardMap:  make(map[string]string),
-		ReverseMap:  make(map[string]string),
-		AIReadyData: make([]map[string]interface{}, 0),
-		Config:      s.config,
+		ForwardMap:         make(map[string]string),
+		ReverseMap:         make(map[string]string),
+		AIReadyData:        make([]map[string]interface{}, 0),
+		DimensionSemantics: make(map[string]*DimensionSemanticInfo),
+		Config:             s.config,
 	}
 
 	// 维度计数器，用于生成唯一代号

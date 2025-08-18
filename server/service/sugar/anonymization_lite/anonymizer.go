@@ -16,23 +16,26 @@ func (s *LiteAnonymizationService) getOrCreateAnonymizedDimension(session *LiteA
 		return anonymized
 	}
 
-	var anonymized string
-	if s.config.UseSemanticMapping {
-		// 使用语义映射生成更有意义的代号
-		anonymized = s.generateSemanticDimensionName(dimName, counters)
-	} else {
-		// 使用传统的简单代号
-		counters["dimension"]++
-		anonymized = fmt.Sprintf("D%02d", counters["dimension"])
-	}
+	// 使用简单的DIM编号，但在描述中包含原始维度名称
+	counters["dimension"]++
+	anonymized := fmt.Sprintf("DIM%02d", counters["dimension"])
 
 	// 存储映射关系
 	session.ForwardMap[dimName] = anonymized
 	session.ReverseMap[anonymized] = dimName
 
+	// 存储维度语义信息，直接使用原始维度名称作为描述
+	session.DimensionSemantics[anonymized] = &DimensionSemanticInfo{
+		AnonymizedName: anonymized,
+		OriginalName:   dimName,
+		SemanticType:   "业务维度",
+		Description:    dimName, // 直接使用原始维度名称
+	}
+
 	global.GVA_LOG.Debug("创建维度匿名映射",
 		zap.String("original", dimName),
-		zap.String("anonymized", anonymized))
+		zap.String("anonymized", anonymized),
+		zap.String("description", dimName))
 
 	return anonymized
 }
@@ -55,16 +58,10 @@ func (s *LiteAnonymizationService) getOrCreateAnonymizedValue(session *LiteAnony
 		anonymizedDim = s.getOrCreateAnonymizedDimension(session, dimName, dimensionCounters)
 	}
 
-	var anonymized string
-	if s.config.UseSemanticMapping {
-		// 使用语义映射生成更有意义的值代号
-		anonymized = s.generateSemanticValueName(dimName, dimValue, anonymizedDim, counters)
-	} else {
-		// 生成新的值代号
-		dimKey := fmt.Sprintf("value_%s", dimName)
-		counters[dimKey]++
-		anonymized = fmt.Sprintf("%s_V%02d", anonymizedDim, counters[dimKey])
-	}
+	// 生成简单的值代号
+	dimKey := fmt.Sprintf("value_%s", dimName)
+	counters[dimKey]++
+	anonymized := fmt.Sprintf("%s_V%02d", anonymizedDim, counters[dimKey])
 
 	// 存储映射关系
 	session.ForwardMap[fullKey] = anonymized
@@ -76,62 +73,6 @@ func (s *LiteAnonymizationService) getOrCreateAnonymizedValue(session *LiteAnony
 		zap.String("anonymizedValue", anonymized))
 
 	return anonymized
-}
-
-// generateSemanticDimensionName 生成语义化的维度名称（简化版）
-func (s *LiteAnonymizationService) generateSemanticDimensionName(dimName string, counters map[string]int) string {
-	lowerName := strings.ToLower(dimName)
-	var prefix string
-
-	// 简化的语义识别
-	if strings.Contains(lowerName, "区域") || strings.Contains(lowerName, "地区") ||
-		strings.Contains(lowerName, "省") || strings.Contains(lowerName, "市") {
-		prefix = "LOC" // Location
-	} else if strings.Contains(lowerName, "产品") || strings.Contains(lowerName, "商品") ||
-		strings.Contains(lowerName, "品牌") || strings.Contains(lowerName, "型号") {
-		prefix = "PRD" // Product
-	} else if strings.Contains(lowerName, "年") || strings.Contains(lowerName, "月") ||
-		strings.Contains(lowerName, "季度") || strings.Contains(lowerName, "日期") {
-		prefix = "TIME" // Time
-	} else if strings.Contains(lowerName, "部门") || strings.Contains(lowerName, "团队") ||
-		strings.Contains(lowerName, "渠道") || strings.Contains(lowerName, "销售") {
-		prefix = "ORG" // Organization
-	} else {
-		prefix = "DIM" // Dimension
-	}
-
-	// 生成基于语义类型的计数器
-	counterKey := fmt.Sprintf("%s_dimension", prefix)
-	counters[counterKey]++
-
-	return fmt.Sprintf("%s%02d", prefix, counters[counterKey])
-}
-
-// generateSemanticValueName 生成语义化的值名称（简化版）
-func (s *LiteAnonymizationService) generateSemanticValueName(dimName, dimValue, dimPrefix string, counters map[string]int) string {
-	lowerValue := strings.ToLower(dimValue)
-	var valuePrefix string
-
-	// 简化的值语义识别
-	if strings.Contains(lowerValue, "高端") || strings.Contains(lowerValue, "优质") ||
-		strings.Contains(lowerValue, "重点") || strings.Contains(lowerValue, "核心") {
-		valuePrefix = "HV" // High Value
-	} else if strings.Contains(lowerValue, "普通") || strings.Contains(lowerValue, "标准") {
-		valuePrefix = "ST" // Standard
-	} else if strings.Contains(lowerValue, "低端") || strings.Contains(lowerValue, "基础") {
-		valuePrefix = "BS" // Basic
-	} else if strings.Contains(lowerValue, "北京") || strings.Contains(lowerValue, "上海") ||
-		strings.Contains(lowerValue, "深圳") || strings.Contains(lowerValue, "广州") {
-		valuePrefix = "T1" // Tier 1 City
-	} else {
-		valuePrefix = "GN" // General
-	}
-
-	// 生成基于语义类别的计数器
-	counterKey := fmt.Sprintf("%s_%s_value", dimPrefix, valuePrefix)
-	counters[counterKey]++
-
-	return fmt.Sprintf("%s_%s%02d", dimPrefix, valuePrefix, counters[counterKey])
 }
 
 // DecodeAIResponse 解码AI响应中的匿名代号（简化版）
@@ -255,9 +196,19 @@ func (session *LiteAnonymizationSession) SerializeToText() (string, error) {
 	builder.WriteString("【简化匿名化贡献度分析数据】\n")
 	builder.WriteString("说明：以下数据已进行匿名化处理，专注于贡献度分析\n\n")
 
+	// 添加维度代号说明
+	if len(session.DimensionSemantics) > 0 {
+		builder.WriteString("维度代号说明：\n")
+		for anonymizedName, semanticInfo := range session.DimensionSemantics {
+			builder.WriteString(fmt.Sprintf("- %s-%s\n",
+				anonymizedName, semanticInfo.Description))
+		}
+		builder.WriteString("\n")
+	}
+
 	// 添加数据列说明
 	builder.WriteString("数据字段说明：\n")
-	builder.WriteString("- 维度代号：表示业务维度（如区域、产品等）\n")
+	builder.WriteString("- 维度代号：表示业务维度，具体含义见上方维度说明\n")
 	builder.WriteString("- 值代号：表示具体的维度值\n")
 	builder.WriteString("- contribution_percent：贡献度百分比\n")
 	builder.WriteString("- is_positive_driver：是否为正向驱动因子\n")
@@ -272,10 +223,13 @@ func (session *LiteAnonymizationSession) SerializeToText() (string, error) {
 
 		// 先输出维度信息
 		for key, value := range item {
-			if strings.HasPrefix(key, "LOC") || strings.HasPrefix(key, "PRD") ||
-				strings.HasPrefix(key, "TIME") || strings.HasPrefix(key, "ORG") ||
-				strings.HasPrefix(key, "DIM") {
-				builder.WriteString(fmt.Sprintf("  %s: %v\n", key, value))
+			if strings.HasPrefix(key, "DIM") {
+				// 添加维度名称提示
+				dimensionHint := ""
+				if semanticInfo, exists := session.DimensionSemantics[key]; exists {
+					dimensionHint = fmt.Sprintf("(%s)", semanticInfo.Description)
+				}
+				builder.WriteString(fmt.Sprintf("  %s%s: %v\n", key, dimensionHint, value))
 			}
 		}
 
@@ -304,6 +258,7 @@ func (session *LiteAnonymizationSession) SerializeToText() (string, error) {
 
 	global.GVA_LOG.Info("匿名化数据序列化完成",
 		zap.Int("dataCount", len(session.AIReadyData)),
+		zap.Int("dimensionSemantics", len(session.DimensionSemantics)),
 		zap.Int("textLength", len(builder.String())))
 
 	return builder.String(), nil
