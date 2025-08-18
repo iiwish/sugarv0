@@ -60,9 +60,13 @@ func (s *LiteAnonymizationService) ProcessContributionData(contributions []Contr
 			aiItem[anonymizedDimName] = anonymizedDimValue
 		}
 
-		// 添加简化的数值数据（只有贡献度）
+		// 添加增强的数值数据（包含变化率等信息）
 		aiItem["contribution_percent"] = s.anonymizeNumericValue(contribution.ContributionPercent)
 		aiItem["is_positive_driver"] = contribution.IsPositiveDriver
+		aiItem["change_rate_percent"] = s.anonymizeNumericValue(contribution.ChangeRatePercent)
+		aiItem["trend_direction"] = contribution.TrendDirection
+		aiItem["impact_level"] = contribution.ImpactLevel
+		aiItem["relative_importance"] = s.anonymizeNumericValue(contribution.RelativeImportance)
 
 		session.AIReadyData = append(session.AIReadyData, aiItem)
 

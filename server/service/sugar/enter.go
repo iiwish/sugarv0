@@ -14,3 +14,8 @@ type ServiceGroup struct {
 	SugarFormulaAiService
 	SugarFoldersService
 }
+
+// GetSugarFormulaAiService 获取AI服务单例实例
+func (s *ServiceGroup) GetSugarFormulaAiService() *SugarFormulaAiService {
+	return GetSugarFormulaAiService()
+}

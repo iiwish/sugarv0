@@ -6,6 +6,7 @@ import (
 	"github.com/flipped-aurora/gin-vue-admin/server/global"
 	"github.com/flipped-aurora/gin-vue-admin/server/model/common/response"
 	sugarReq "github.com/flipped-aurora/gin-vue-admin/server/model/sugar/request"
+	"github.com/flipped-aurora/gin-vue-admin/server/service"
 	"github.com/flipped-aurora/gin-vue-admin/server/utils"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -108,7 +109,7 @@ func (s *SugarFormulaQueryApi) ExecuteAiFetch(c *gin.Context) {
 	userId := utils.GetUserID(c)
 	userIdStr := strconv.Itoa(int(userId))
 
-	result, err := sugarFormulaAiService.ExecuteAiFetchFormula(ctx, &req, userIdStr)
+	result, err := service.ServiceGroupApp.SugarServiceGroup.GetSugarFormulaAiService().ExecuteAiFetchFormula(ctx, &req, userIdStr)
 	if err != nil {
 		global.GVA_LOG.Error("AIFETCH 执行失败!", zap.Error(err))
 		response.FailWithMessage("AIFETCH 执行失败: "+err.Error(), c)
@@ -145,7 +146,7 @@ func (s *SugarFormulaQueryApi) ExecuteAiExplainRange(c *gin.Context) {
 	userId := utils.GetUserID(c)
 	userIdStr := strconv.Itoa(int(userId))
 
-	result, err := sugarFormulaAiService.ExecuteAiExplainFormula(ctx, &req, userIdStr)
+	result, err := service.ServiceGroupApp.SugarServiceGroup.GetSugarFormulaAiService().ExecuteAiExplainFormula(ctx, &req, userIdStr)
 	if err != nil {
 		global.GVA_LOG.Error("AIEXPLAINRange 执行失败!", zap.Error(err))
 		response.FailWithMessage("AIEXPLAINRange 执行失败: "+err.Error(), c)

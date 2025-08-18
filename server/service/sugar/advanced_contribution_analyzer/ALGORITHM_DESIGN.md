@@ -11,177 +11,147 @@
 #### 算法原理
 区分度（Discrimination）衡量不同维度组合在贡献度上的差异程度。高区分度表示存在明显的主导因素，低区分度表示贡献相对均匀。
 
-#### 数学公式
+#### 改进的区分度计算方法
+
+**多组合情况的计算公式：**
 ```
-区分度 = 标准差权重 × 标准差 + 极差权重 × 极差
+区分度 = 变异系数权重 × 变异系数 + 极差权重 × 极差 + 最大值权重 × 最大值权重
 其中：
-- 标准差权重 = 0.7
-- 极差权重 = 0.3
-- 标准差 = √(Σ(xi - μ)² / n)
-- 极差 = max(贡献度) - min(贡献度)
-- μ = 平均贡献度
+- 变异系数权重 = 50%
+- 极差权重 = 30%
+- 最大值权重 = 20%
+- 变异系数 = (标准差 / 均值) × 100%
+- 极差 = max(|贡献度|) - min(|贡献度|)
+- 最大值权重 = max(|贡献度|) / 100（归一化到0-1范围）
 ```
 
-#### 实现代码
-```go
-func (dal *DimensionAnalysisLevel) CalculateDiscrimination() {
-    if len(dal.Combinations) <= 1 {
-        dal.Discrimination = 0
-        return
-    }
+**单组合情况的特殊处理：**
+为了正确识别高贡献度的主导因子，算法对单组合情况采用特殊的区分度计算方法：
 
-    // 计算贡献度的方差
-    var contributions []float64
-    var sum float64
-    
-    for _, combo := range dal.Combinations {
-        contributions = append(contributions, combo.Contribution)
-        sum += combo.Contribution
-    }
-    
-    mean := sum / float64(len(contributions))
-    
-    var variance float64
-    for _, contrib := range contributions {
-        variance += math.Pow(contrib-mean, 2)
-    }
-    variance /= float64(len(contributions))
-    
-    // 计算最大最小贡献度差异
-    dal.MaxContribution = contributions[0]
-    dal.MinContribution = contributions[0]
-    
-    for _, contrib := range contributions {
-        if contrib > dal.MaxContribution {
-            dal.MaxContribution = contrib
-        }
-        if contrib < dal.MinContribution {
-            dal.MinContribution = contrib
-        }
-    }
-    
-    // 综合区分度计算：标准差占70%，极差占30%
-    standardDev := math.Sqrt(variance)
-    range_ := dal.MaxContribution - dal.MinContribution
-    
-    dal.Discrimination = standardDev*0.7 + range_*0.3
-}
-```
+- **高贡献度组合（>30%）**：基础分80分 + 贡献度加权（0.5倍）
+- **中等贡献度组合（>15%）**：基础分60分 + 贡献度加权（0.8倍）
+- **低贡献度组合（≤15%）**：贡献度的2倍作为区分度
+
+这种设计确保了即使只有一个组合，如果其贡献度很高（如47%），也能获得相应的高区分度（约103.5分），从而被算法正确识别为重要的分析结果。
+
+#### 算法改进的核心优势
+
+1. **变异系数引入**：更好地反映相对差异程度，避免受绝对数值大小影响
+2. **绝对值处理**：正确处理负贡献度，确保计算的准确性
+3. **单组合优化**：解决了原算法对单组合直接返回0的问题
+4. **主导因子识别**：高贡献度的主导因子能够被正确识别和优先选择
 
 #### 权重设计理由
-- **标准差权重70%**：反映整体分布的离散程度，更稳定
+- **变异系数权重50%**：反映相对差异程度，更加稳定和可比较
 - **极差权重30%**：突出最大差异，识别极端情况
+- **最大值权重20%**：突出主导因子的重要性，确保高贡献度组合得到重视
 
 ### 2. 智能下钻决策算法
 
-#### 决策流程图
-```
-开始
-  ↓
-检查区分度是否 ≥ 阈值(15%)
-  ↓ 否
-停止下钻：区分度不足
-  ↓ 是
-检查是否启用智能停止
-  ↓ 是
-检查区分度改善是否 ≥ 阈值(5%)
-  ↓ 否
-停止下钻：改善不足
-  ↓ 是
-检查有效组合数量是否 ≥ 2
-  ↓ 否
-停止下钻：组合不足
-  ↓ 是
-继续下钻
+#### 改进的决策流程图
+```mermaid
+flowchart TD
+    A[开始] --> B[检查区分度是否 ≥ 阈值15%]
+    B -->|否| C[停止下钻：区分度不足]
+    B -->|是| D[检查组合数量]
+    D --> E{组合数量 = 0?}
+    E -->|是| F[停止下钻：没有有效组合]
+    E -->|否| G{组合数量 = 1?}
+    G -->|是| H{贡献度 > 30%?}
+    H -->|是| I[继续分析：高贡献度单组合]
+    H -->|否| J[停止下钻：单组合贡献度不足]
+    G -->|否| K[检查是否启用智能停止]
+    K -->|是| L[检查高贡献度潜力]
+    L --> M{最大贡献度 > 25%?}
+    M -->|是| N[检测到高贡献度潜力，继续下钻]
+    M -->|否| O[检查区分度改善是否 ≥ 阈值5%]
+    O -->|否| P[停止下钻：改善不足]
+    O -->|是| I
+    K -->|否| I
+    I --> Q[继续下钻]
+    N --> Q
 ```
 
-#### 停止条件
+#### 优化的停止条件
+
+**基础停止条件：**
 1. **区分度阈值**：当前层级区分度 < 15%
-2. **改善阈值**：区分度改善 < 5%（仅在启用智能停止时）
-3. **组合数量**：有效组合数量 < 2
-4. **最大层级**：达到最大下钻层级限制
+2. **最大层级**：达到最大下钻层级限制
 
-#### 实现代码
-```go
-func (aca *AdvancedContributionAnalyzer) shouldStopDrillDown(
-    currentLevel *DimensionAnalysisLevel, 
-    previousDiscrimination float64, 
-    level int) (bool, string) {
-    
-    // 检查区分度阈值
-    if currentLevel.Discrimination < aca.config.DiscriminationThreshold {
-        return true, fmt.Sprintf("区分度%.2f%%低于阈值%.2f%%", 
-            currentLevel.Discrimination, aca.config.DiscriminationThreshold)
-    }
-    
-    // 检查智能停止条件
-    if aca.config.EnableSmartStop && level > 1 && previousDiscrimination > 0 {
-        improvement := currentLevel.Discrimination - previousDiscrimination
-        if improvement < aca.config.DiscriminationImprovementThreshold {
-            return true, fmt.Sprintf("区分度改善%.2f%%低于阈值%.2f%%", 
-                improvement, aca.config.DiscriminationImprovementThreshold)
-        }
-    }
-    
-    // 检查组合数量
-    if len(currentLevel.Combinations) <= 1 {
-        return true, "有效组合数量不足"
-    }
-    
-    return false, ""
-}
-```
+**改进的组合数量判断：**
+- **无组合**：立即停止分析
+- **单组合且高贡献度（>30%）**：继续分析，让其参与最优层级选择
+- **单组合且低贡献度（≤30%）**：停止分析
+- **多组合**：继续分析
+
+**智能停止条件优化：**
+当启用智能停止且为多组合情况时，算法会检查当前层级是否具有高贡献度潜力：
+- **高贡献度潜力判断**：当前层级最大贡献度 > 25%
+- **潜力存在时**：忽略区分度改善阈值，继续下钻以寻找更高贡献度的组合
+- **潜力不足时**：按原有逻辑检查区分度改善是否 ≥ 5%
+
+#### 算法改进的核心优势
+
+1. **高贡献度单组合保护**：避免因组合数量不足而错过重要的主导因子
+2. **智能判断机制**：根据贡献度大小决定是否继续分析单组合
+3. **高贡献度潜力检测**：当检测到可能存在更高贡献度组合时，继续下钻而不是提前停止
+4. **业务价值导向**：优先保留对业务有重要意义的高贡献度组合
+
+这种改进确保了算法能够发现所有层级的高贡献度组合，特别是像47%贡献度的交通银行+欧元+专用户这样的主导组合，不会因为中间层级的区分度改善不足而被错过。
 
 ### 3. 最优层级选择算法
 
-#### 评分机制
-最优层级选择基于综合评分，考虑区分度和组合数量的平衡：
+#### 改进的评分机制
 
+**最明细层级优先策略：**
+算法首先检查最明细层级（通常是最后一个层级）是否包含高贡献度的主导因子。如果满足以下条件，直接选择最明细层级：
+- 最大贡献度 > 30%
+- 区分度 > 60分
+
+这种设计确保了像47%贡献度的交通银行+欧元+专用户组合这样的主导因子能够被优先识别和选择。
+
+**多维度组合优先策略：**
+为了确保返回包含完整维度信息的分析结果，算法对多维度组合给予显著的优先权：
+
+多维度组合评分计算过程：
+1. **基础分数**：使用层级的区分度作为基础分数
+2. **多维度加权**：维度数量 ≥ 2 的层级获得 1.5 倍加权
+3. **组合数量优化**：3-15 个组合的层级获得 1.2 倍加权
+4. **最明细层级加权**：最明细层级且最大贡献度 > 20% 时获得 1.1 倍加权
+5. **多维度高贡献度加权**：多维度且最大贡献度 > 10% 时获得额外 1.2 倍加权
+
+**综合评分机制：**
+当最明细层级不满足优先条件时，使用改进的综合评分机制：
+
+最终评分计算公式：
 ```
-综合评分 = 区分度 × 组合数量权重
+最终评分 = 区分度 × 多维度权重 × 组合数量权重 × 层级权重 × 高贡献度权重
+
 其中：
-- 组合数量权重 = f(组合数量)
-- f(n) = 1.2 if 3 ≤ n ≤ 8
-- f(n) = 0.9 if n > 8  
-- f(n) = 1.0 otherwise
+- 多维度权重 = 1.5（维度数 ≥ 2）或 1.0（维度数 = 1）
+- 组合数量权重 = 1.2（3 ≤ 组合数 ≤ 15）或 0.9（组合数 > 15）或 1.0（其他）
+- 层级权重 = 1.1（最明细层级且最大贡献度 > 20%）或 1.0（其他）
+- 高贡献度权重 = 1.2（多维度且最大贡献度 > 10%）或 1.0（其他）
 ```
+
+#### 算法改进的核心优势
+
+1. **主导因子优先识别**：高贡献度的主导因子能够被直接识别，无需复杂的评分比较
+2. **多维度信息完整性**：优先选择包含多个维度信息的层级，提供更完整的业务洞察
+3. **最明细层级偏好**：在同等条件下，优先选择更详细的分析层级
+4. **业务价值导向**：确保对业务最有价值的分析结果被优先展示
+5. **智能平衡机制**：在主导因子不明显时，仍能通过综合评分选择最佳层级
 
 #### 权重设计理由
-- **3-8个组合**：最适合业务理解和决策制定
-- **超过8个组合**：过于复杂，降低权重
-- **少于3个组合**：选择有限，保持标准权重
 
-#### 实现代码
-```go
-func (aca *AdvancedContributionAnalyzer) findOptimalLevel(levels []*DimensionAnalysisLevel) int {
-    if len(levels) == 0 {
-        return -1
-    }
-    
-    maxScore := -1.0
-    optimalLevel := 0
-    
-    for i, level := range levels {
-        // 综合考虑区分度和组合数量
-        score := level.Discrimination
-        
-        // 对组合数量进行加权
-        combinationCount := float64(len(level.Combinations))
-        if combinationCount >= 3 && combinationCount <= 8 {
-            score *= 1.2 // 组合数量适中时加权
-        } else if combinationCount > 8 {
-            score *= 0.9 // 组合过多时减权
-        }
-        
-        if score > maxScore {
-            maxScore = score
-            optimalLevel = i
-        }
-    }
-    
-    return optimalLevel
-}
-```
+- **多维度优先（1.5倍权重）**：多维度组合提供更完整的业务洞察，如"交通银行欧元专用户"比"交通银行"更有价值
+- **最明细层级优先**：业务分析通常需要最详细的洞察
+- **高贡献度阈值（30%）**：确保只有真正的主导因子才触发优先选择
+- **区分度阈值（60分）**：保证选择的层级具有足够的分析价值
+- **3-15个组合最优**：适合业务理解和决策制定，避免信息过载
+- **多维度高贡献度加权**：鼓励选择既有多维度信息又有业务价值的层级
+
+这种改进确保了算法能够优先选择包含完整维度信息的多维度组合，从而返回如"交通银行欧元专用户增长贡献最显著"这样的完整业务洞察，而不是仅仅返回"交通银行增长贡献最显著"。
 
 ### 4. 维度优先级排序算法
 
@@ -189,44 +159,14 @@ func (aca *AdvancedContributionAnalyzer) findOptimalLevel(levels []*DimensionAna
 通过计算每个维度的单独贡献度方差，确定维度的重要性排序。方差越大，表示该维度的区分能力越强。
 
 #### 计算步骤
-1. 提取每个维度的单维度组合
-2. 计算该维度所有值的贡献度方差
-3. 按方差降序排列维度
+1. **提取单维度组合**：从所有维度组合中筛选出每个维度的单独组合数据
+2. **计算贡献度方差**：对每个维度的所有值计算贡献度方差，衡量该维度内部的差异程度
+3. **排序确定优先级**：按方差从大到小排列维度，方差越大的维度优先级越高
 
-#### 实现代码
-```go
-func (aca *AdvancedContributionAnalyzer) GetDimensionPriorityOrder(data *ContributionData) ([]string, error) {
-    // 计算每个维度的单独贡献度方差
-    dimensionVariances := make(map[string]float64)
-    
-    for _, dimension := range data.AvailableDimensions {
-        variance := aca.calculateDimensionVariance(data.DimensionCombinations, dimension)
-        dimensionVariances[dimension] = variance
-    }
-    
-    // 按方差排序维度
-    type dimensionScore struct {
-        dimension string
-        variance  float64
-    }
-    
-    var scores []dimensionScore
-    for dim, variance := range dimensionVariances {
-        scores = append(scores, dimensionScore{dimension: dim, variance: variance})
-    }
-    
-    sort.Slice(scores, func(i, j int) bool {
-        return scores[i].variance > scores[j].variance
-    })
-    
-    var priorityOrder []string
-    for _, score := range scores {
-        priorityOrder = append(priorityOrder, score.dimension)
-    }
-    
-    return priorityOrder, nil
-}
-```
+#### 算法逻辑
+算法首先遍历所有可用维度，对每个维度收集其单独的贡献度数据。然后计算这些贡献度值的统计方差，方差反映了该维度内不同值之间的差异程度。最后将所有维度按照方差大小降序排列，形成维度优先级顺序。
+
+这种方法能够有效识别出对业务变化影响最大的关键维度，为后续的多维度组合分析提供指导。
 
 ## 数据质量算法
 
@@ -237,26 +177,7 @@ func (aca *AdvancedContributionAnalyzer) GetDimensionPriorityOrder(data *Contrib
 - **阈值**：80%
 
 #### 实现逻辑
-```go
-func (do *DataOptimizer) checkDataCompleteness(data *ContributionData, report *DataQualityReport) {
-    validCount := 0
-    
-    for _, combo := range data.DimensionCombinations {
-        if len(combo.Values) > 0 && combo.AbsoluteValue != 0 {
-            validCount++
-        }
-    }
-    
-    report.ValidCombinations = validCount
-    completenessRatio := float64(validCount) / float64(len(data.DimensionCombinations))
-    
-    if completenessRatio < 0.8 {
-        report.QualityScore -= 20
-        report.Issues = append(report.Issues, 
-            fmt.Sprintf("数据完整性不足：有效组合占比仅%.1f%%", completenessRatio*100))
-    }
-}
-```
+算法遍历所有维度组合，检查每个组合是否包含有效的维度值和非零的绝对值。统计有效组合的数量，计算有效组合占总组合数的比例。如果这个比例低于80%的阈值，则认为数据完整性不足，会降低数据质量评分并记录相应的问题描述。
 
 ### 2. 维度分布均衡性检查
 
@@ -278,39 +199,8 @@ func (do *DataOptimizer) checkDataCompleteness(data *ContributionData, report *D
 #### 检测方法
 使用简化的异常值检测：均值 ± 2倍标准差
 
-#### 实现代码
-```go
-func (do *DataOptimizer) detectOutliers(values []float64) []float64 {
-    if len(values) < 4 {
-        return nil
-    }
-    
-    // 计算均值和标准差
-    sum := float64(0)
-    for _, v := range values {
-        sum += v
-    }
-    mean := sum / float64(len(values))
-    
-    variance := float64(0)
-    for _, v := range values {
-        variance += (v - mean) * (v - mean)
-    }
-    stdDev := math.Sqrt(variance / float64(len(values)))
-    
-    // 检测异常值
-    var outliers []float64
-    threshold := 2 * stdDev
-    
-    for _, v := range values {
-        if v < mean-threshold || v > mean+threshold {
-            outliers = append(outliers, v)
-        }
-    }
-    
-    return outliers
-}
-```
+#### 实现逻辑
+异常值检测算法首先检查数据量是否足够（至少4个值），然后计算所有值的均值和标准差。使用"均值±2倍标准差"作为异常值判断标准，超出这个范围的值被认为是异常值。这种方法简单有效，能够识别出明显偏离正常范围的数据点，帮助提高分析结果的可靠性。
 
 ## 业务洞察生成算法
 
@@ -324,18 +214,7 @@ func (do *DataOptimizer) detectOutliers(values []float64) []float64 {
 5. **业务建议模板**
 
 #### 模板示例
-```go
-// 主要贡献者模板
-if len(topCombo.Values) > 1 {
-    // 多维度组合
-    insight = fmt.Sprintf("最显著的变化来自%s的组合，贡献度达到%.1f%%，表明这一特定组合在业务变化中起到关键作用", 
-        strings.Join(dimensionParts, "与"), topCombo.Contribution)
-} else {
-    // 单维度
-    insight = fmt.Sprintf("%s维度中的%s表现最为突出，贡献度为%.1f%%，是推动整体变化的主要因素", 
-        topCombo.Values[0].Dimension, topCombo.Values[0].Label, topCombo.Contribution)
-}
-```
+算法根据分析结果的特点选择合适的模板。对于多维度组合，会生成类似"最显著的变化来自某某与某某的组合，贡献度达到某某百分比"的洞察。对于单维度情况，会生成"某某维度中的某某表现最为突出，贡献度为某某百分比"的描述。这种模板化的方法确保了生成的业务洞察既准确又易于理解。
 
 ### 2. 业务语言转换规则
 
@@ -384,16 +263,10 @@ dimensionMap := make(map[string]float64, len(dimensions))
 - **分析目标**：探索性分析降低阈值，决策性分析提高阈值
 
 #### 推荐配置
-```go
-// 探索性分析
-config.DiscriminationThreshold = 10.0
-
-// 标准分析
-config.DiscriminationThreshold = 15.0
-
-// 决策性分析
-config.DiscriminationThreshold = 20.0
-```
+根据不同的分析需求，建议采用不同的区分度阈值配置：
+- **探索性分析**：使用较低的阈值（10.0），以发现更多潜在的模式
+- **标准分析**：使用中等阈值（15.0），平衡发现能力和分析质量
+- **决策性分析**：使用较高阈值（20.0），确保只关注最显著的差异
 
 ### 2. 组合数量阈值调优
 
@@ -437,16 +310,7 @@ config.DiscriminationThreshold = 20.0
 ### 1. 自定义区分度算法
 
 #### 扩展接口
-```go
-type DiscriminationCalculator interface {
-    Calculate(contributions []float64) float64
-}
-
-// 允许注入自定义算法
-func (aca *AdvancedContributionAnalyzer) SetDiscriminationCalculator(calc DiscriminationCalculator) {
-    aca.discriminationCalc = calc
-}
-```
+系统提供了区分度计算器的接口，允许用户注入自定义的区分度计算算法。接口定义了计算方法，接受贡献度数组作为输入，返回计算得出的区分度值。分析器提供了设置自定义计算器的方法，使得系统能够根据不同的业务需求采用不同的区分度计算策略。
 
 ### 2. 多指标支持
 

@@ -14,10 +14,25 @@ type DataOptimizer struct {
 func NewDataOptimizer(config *AnalysisConfig) *DataOptimizer {
 	if config == nil {
 		config = DefaultAnalysisConfig()
+		if config == nil {
+			// 如果默认配置也失败，创建一个最基本的配置
+			config = &AnalysisConfig{
+				DiscriminationThreshold:            15.0,
+				MinContributionThreshold:           5.0,
+				MaxDrillDownLevels:                 4,
+				TopCombinationsCount:               5,
+				MinTopCombinations:                 1,
+				EnableSmartStop:                    true,
+				DiscriminationImprovementThreshold: 5.0,
+			}
+		}
 	}
-	return &DataOptimizer{
+
+	optimizer := &DataOptimizer{
 		config: config,
 	}
+
+	return optimizer
 }
 
 // OptimizedPromptRequest 优化后的提示词请求

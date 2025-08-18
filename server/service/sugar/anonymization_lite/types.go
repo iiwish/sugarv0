@@ -28,7 +28,12 @@ type ContributionItem struct {
 	DimensionValues     map[string]interface{} `json:"dimension_values"`     // 维度值组合
 	ContributionPercent float64                `json:"contribution_percent"` // 贡献度百分比
 	IsPositiveDriver    bool                   `json:"is_positive_driver"`   // 是否为正向驱动因子
-	// 移除了 CurrentValue, BaseValue, ChangeValue - 只保留贡献度
+
+	// 新增字段：提供更丰富的分析信息（比例化数据，避免泄露绝对值）
+	ChangeRatePercent  float64 `json:"change_rate_percent"` // 变化率百分比（相对于基期的变化比例）
+	TrendDirection     string  `json:"trend_direction"`     // 趋势方向："增长"、"下降"、"持平"
+	ImpactLevel        string  `json:"impact_level"`        // 影响程度："高"、"中"、"低"
+	RelativeImportance float64 `json:"relative_importance"` // 相对重要性（0-100，基于贡献度绝对值的排名百分位）
 }
 
 // LiteAnonymizationSession 简化的匿名化会话

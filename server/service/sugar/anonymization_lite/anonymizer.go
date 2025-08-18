@@ -260,7 +260,11 @@ func (session *LiteAnonymizationSession) SerializeToText() (string, error) {
 	builder.WriteString("- 维度代号：表示业务维度（如区域、产品等）\n")
 	builder.WriteString("- 值代号：表示具体的维度值\n")
 	builder.WriteString("- contribution_percent：贡献度百分比\n")
-	builder.WriteString("- is_positive_driver：是否为正向驱动因子\n\n")
+	builder.WriteString("- is_positive_driver：是否为正向驱动因子\n")
+	builder.WriteString("- change_rate_percent：变化率百分比\n")
+	builder.WriteString("- trend_direction：趋势方向（增长/下降/持平）\n")
+	builder.WriteString("- impact_level：影响程度（高/中/低）\n")
+	builder.WriteString("- relative_importance：相对重要性（0-100分）\n\n")
 
 	builder.WriteString("数据内容：\n")
 	for i, item := range session.AIReadyData {
@@ -281,6 +285,18 @@ func (session *LiteAnonymizationSession) SerializeToText() (string, error) {
 		}
 		if ipd, ok := item["is_positive_driver"]; ok {
 			builder.WriteString(fmt.Sprintf("  正向驱动: %v\n", ipd))
+		}
+		if crp, ok := item["change_rate_percent"]; ok {
+			builder.WriteString(fmt.Sprintf("  变化率: %.2f%%\n", crp))
+		}
+		if td, ok := item["trend_direction"]; ok {
+			builder.WriteString(fmt.Sprintf("  趋势方向: %v\n", td))
+		}
+		if il, ok := item["impact_level"]; ok {
+			builder.WriteString(fmt.Sprintf("  影响程度: %v\n", il))
+		}
+		if ri, ok := item["relative_importance"]; ok {
+			builder.WriteString(fmt.Sprintf("  相对重要性: %.1f分\n", ri))
 		}
 
 		builder.WriteString("\n")

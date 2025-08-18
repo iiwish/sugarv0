@@ -16,15 +16,43 @@ type AdvancedContributionService struct {
 
 // NewAdvancedContributionService 创建增强版贡献度分析服务
 func NewAdvancedContributionService(config *AnalysisConfig) *AdvancedContributionService {
-	if config == nil {
-		config = DefaultAnalysisConfig()
-	}
+	log.Printf("NewAdvancedContributionService: 开始创建增强版贡献度分析服务")
 
-	return &AdvancedContributionService{
-		analyzer:      NewAdvancedContributionAnalyzer(config),
-		dataOptimizer: NewDataOptimizer(config),
+	if config == nil {
+		log.Printf("NewAdvancedContributionService: 输入配置为nil，使用默认配置")
+		config = DefaultAnalysisConfig()
+		if config == nil {
+			log.Printf("NewAdvancedContributionService: 默认配置也为nil，创建失败")
+			return nil
+		}
+	}
+	log.Printf("NewAdvancedContributionService: 配置验证通过 - DiscriminationThreshold=%.2f, MaxDrillDownLevels=%d",
+		config.DiscriminationThreshold, config.MaxDrillDownLevels)
+
+	log.Printf("NewAdvancedContributionService: 正在创建分析器...")
+	analyzer := NewAdvancedContributionAnalyzer(config)
+	if analyzer == nil {
+		log.Printf("NewAdvancedContributionService: 创建分析器失败")
+		return nil
+	}
+	log.Printf("NewAdvancedContributionService: 分析器创建成功")
+
+	log.Printf("NewAdvancedContributionService: 正在创建数据优化器...")
+	dataOptimizer := NewDataOptimizer(config)
+	if dataOptimizer == nil {
+		log.Printf("NewAdvancedContributionService: 创建数据优化器失败")
+		return nil
+	}
+	log.Printf("NewAdvancedContributionService: 数据优化器创建成功")
+
+	service := &AdvancedContributionService{
+		analyzer:      analyzer,
+		dataOptimizer: dataOptimizer,
 		config:        config,
 	}
+
+	log.Printf("NewAdvancedContributionService: 服务创建成功，地址=%p", service)
+	return service
 }
 
 // AnalysisRequest 分析请求
@@ -110,81 +138,25 @@ func (acs *AdvancedContributionService) PerformAdvancedAnalysis(ctx context.Cont
 
 	response.Success = true
 
-	log.Printf("增强版贡献度分析完成: 分析层级=%d, 最优层级=%d, 处理时间=%dms",
-		metrics.AnalyzedLevels, drillDownResult.OptimalLevel+1, metrics.ProcessingTimeMs)
+	log.Printf("增强版贡献度分析完成: 分析层级=%d, 最优层级索引=%d, 处理时间=%dms",
+		metrics.AnalyzedLevels, drillDownResult.OptimalLevel, metrics.ProcessingTimeMs)
 
 	return response, nil
 }
 
-// generateBusinessInsights 生成业务洞察
+// generateBusinessInsights 生成业务洞察（简化版，移除自然语言描述）
 func (acs *AdvancedContributionService) generateBusinessInsights(result *DrillDownResult, qualityReport *DataQualityReport) []string {
-	var insights []string
-
-	if len(result.TopCombinations) == 0 {
-		insights = append(insights, "当前数据未显示明显的贡献度差异，建议检查分析维度或时间范围")
-		return insights
-	}
-
-	// 主要贡献者洞察
-	topCombo := result.TopCombinations[0]
-	if len(topCombo.Values) > 1 {
-		// 多维度组合
-		var dimensionParts []string
-		for _, value := range topCombo.Values {
-			dimensionParts = append(dimensionParts, value.Label)
-		}
-		insights = append(insights, fmt.Sprintf("最显著的变化来自%s的组合，贡献度达到%.1f%%，表明这一特定组合在业务变化中起到关键作用",
-			strings.Join(dimensionParts, "与"), topCombo.Contribution))
-	} else if len(topCombo.Values) == 1 {
-		// 单维度
-		insights = append(insights, fmt.Sprintf("%s维度中的%s表现最为突出，贡献度为%.1f%%，是推动整体变化的主要因素",
-			topCombo.Values[0].Dimension, topCombo.Values[0].Label, topCombo.Contribution))
-	}
-
-	// 分析层级洞察
-	if result.OptimalLevel >= 0 && result.OptimalLevel < len(result.Levels) {
-		optimalLevel := result.Levels[result.OptimalLevel]
-		if len(optimalLevel.Dimensions) > 1 {
-			insights = append(insights, fmt.Sprintf("通过%s的组合分析能够获得最佳的业务洞察，区分度达到%.1f%%",
-				strings.Join(optimalLevel.Dimensions, "与"), optimalLevel.Discrimination))
-		}
-	}
-
-	// 对比分析洞察
-	if len(result.TopCombinations) > 1 {
-		secondCombo := result.TopCombinations[1]
-		contributionGap := topCombo.Contribution - secondCombo.Contribution
-		if contributionGap > 10 {
-			insights = append(insights, fmt.Sprintf("领先组合的贡献度比第二位高出%.1f个百分点，显示出明显的集中性特征", contributionGap))
-		} else {
-			insights = append(insights, "前几位贡献者的差距较小，变化相对分散，需要关注多个重点领域")
-		}
-	}
-
-	// 数据质量相关洞察
-	if qualityReport.QualityScore < 80 {
-		insights = append(insights, "建议优化数据获取策略以提高分析精度，当前数据可能存在完整性或一致性问题")
-	}
-
-	// 业务建议
-	if topCombo.Contribution > 50 {
-		insights = append(insights, "单一组合贡献度超过50%，建议重点关注该领域的风险管控和持续优化")
-	} else if topCombo.Contribution < 20 {
-		insights = append(insights, "变化较为分散，建议采用多元化的管理策略，关注各个维度的协调发展")
-	}
-
-	return insights
+	// 根据需求，移除自然语言描述，只保留技术指标
+	// 业务洞察将通过排序后的数据列表体现，不需要额外的文本描述
+	return []string{}
 }
 
-// generateEnhancedSummary 生成增强摘要
+// generateEnhancedSummary 生成增强摘要（简化版，移除自然语言描述）
 func (acs *AdvancedContributionService) generateEnhancedSummary(result *DrillDownResult, metrics *AnalysisMetrics, qualityReport *DataQualityReport) string {
+	// 根据需求，移除自然语言描述，只保留技术指标摘要
 	var summary strings.Builder
 
-	// 基础分析结果
-	summary.WriteString(result.AnalysisSummary)
-
-	// 添加分析深度信息
-	summary.WriteString(fmt.Sprintf("。本次分析共检查了%d个层级，", metrics.AnalyzedLevels))
+	summary.WriteString(fmt.Sprintf("本次分析共检查了%d个层级，", metrics.AnalyzedLevels))
 
 	if metrics.AnalyzedLevels > 1 {
 		summary.WriteString(fmt.Sprintf("通过智能下钻算法确定第%d层级为最优分析深度", result.OptimalLevel+1))
@@ -263,5 +235,8 @@ func (acs *AdvancedContributionService) UpdateAnalysisConfig(config *AnalysisCon
 
 // GetCurrentConfig 获取当前配置
 func (acs *AdvancedContributionService) GetCurrentConfig() *AnalysisConfig {
+	if acs == nil {
+		return nil
+	}
 	return acs.config
 }
