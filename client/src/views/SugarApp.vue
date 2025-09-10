@@ -54,6 +54,44 @@
       
       <!-- Univer容器 -->
       <div id="univer-sheet-container" class="univer-container"></div>
+      
+      <!-- 欢迎页面 -->
+      <div v-if="!workspace.currentNode.value" class="welcome-container">
+        <div class="welcome-content">
+          <div class="welcome-icon">
+            <el-icon size="64" color="#409eff">
+              <DocumentAdd />
+            </el-icon>
+          </div>
+          <h2>欢迎使用 Sugar Analytics</h2>
+          <p>智能数据分析平台，基于 Univer 表格引擎</p>
+          <div class="welcome-actions">
+            <el-button type="primary" @click="handleCreateNewFile">
+              <el-icon><DocumentAdd /></el-icon>
+              创建新文件
+            </el-button>
+            <el-button @click="handleOpenRecentFile" :disabled="!hasRecentFiles">
+              <el-icon><FolderOpened /></el-icon>
+              打开最近文件
+            </el-button>
+          </div>
+          <div class="recent-files" v-if="hasRecentFiles">
+            <h3>最近访问</h3>
+            <div class="recent-file-list">
+              <div
+                v-for="file in workspace.recentFiles.value.slice(0, 5)"
+                :key="file.id"
+                class="recent-file-item"
+                @click="handleNodeClick(file)"
+              >
+                <el-icon><Document /></el-icon>
+                <span>{{ file.name }}</span>
+                <span class="file-path">{{ getFilePath(file) }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </main>
 
     <!-- 聊天面板 -->
@@ -67,16 +105,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, onActivated, onDeactivated } from 'vue'
-import { ElMessage } from 'element-plus'
-import { DocumentAdd, Refresh, ChatDotRound } from '@element-plus/icons-vue'
-import { useApp } from '@/composables/useApp'
-import { useWorkspace } from '@/composables/useWorkspace'
+import { ref, onMounted, onBeforeUnmount, onActivated, onDeactivated, computed } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { DocumentAdd, Refresh, ChatDotRound, FolderOpened, Document } from '@element-plus/icons-vue'
+import { useApp, useWorkspace, usePluginManager } from '@/composables'
 import Sidebar from '@/components/Sidebar.vue'
-import ChatPanel from '@/components/ChatPanel/ChatPanel.vue'
-import type { WorkspaceTreeNode, ApiResponse } from '@/types/api'
-import type { UniverCorePlugin } from '@/plugins/univer-core'
-import type { CustomFormulasPlugin } from '@/plugins/custom-formulas'
+import ChatPanel from '@/components/ChatPanel.vue'
+import type { WorkspaceTreeNode } from '@/types/api'
 
 // 定义组件名称，用于keep-alive
 defineOptions({
@@ -91,8 +126,13 @@ const chatCollapsed = ref(false)
 const isSaving = ref(false)
 const isRefreshing = ref(false)
 
-// 使用工作空间管理
+// 使用组合式函数
+const app = useApp()
 const workspace = useWorkspace()
+const pluginManager = usePluginManager()
+
+// 计算属性
+const hasRecentFiles = computed(() => workspace.recentFiles.value.length > 0)
 
 const updateHeight = () => {
   if (containerRef.value) {
@@ -110,26 +150,35 @@ const removeKeyboardListeners = () => {
   window.removeEventListener('keydown', handleKeyDown)
 }
 
-onMounted(() => {
+onMounted(async () => {
   updateHeight()
   window.addEventListener('resize', updateHeight)
-  // 添加键盘快捷键监听
   addKeyboardListeners()
+  
+  // 初始化应用
+  await app.initialize()
+  
+  // 初始化插件管理器
+  await pluginManager.initialize()
+  
+  // 初始化工作空间
+  workspace.initialize()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', updateHeight)
   removeKeyboardListeners()
+  
+  // 清理资源
+  pluginManager.cleanup()
 })
 
 // 处理keep-alive的激活和停用
 onActivated(() => {
-  // 重新添加键盘监听器
   addKeyboardListeners()
 })
 
 onDeactivated(() => {
-  // 移除键盘监听器
   removeKeyboardListeners()
 })
 
@@ -164,13 +213,13 @@ const handleSaveFile = async () => {
     isSaving.value = true
     
     // 获取Univer核心插件
-    const univerCorePlugin = app.pluginManager?.getPlugin('univer-core') as UniverCorePlugin
+    const univerCorePlugin = pluginManager.registeredPlugins.value.get('univer-core')
     if (!univerCorePlugin) {
       throw new Error('Univer核心插件未找到')
     }
 
     // 获取当前工作簿
-    const workbook = univerCorePlugin.getCurrentWorkbook()
+    const workbook = univerCorePlugin.getCurrentWorkbook?.()
     if (!workbook) {
       ElMessage.warning('没有打开的工作簿')
       return
@@ -184,7 +233,7 @@ const handleSaveFile = async () => {
     const response = await saveWorkbookContent({
       id: currentNode.id,
       content: workbookData
-    }) as unknown as ApiResponse<any>
+    })
 
     if (response?.code === 0) {
       ElMessage.success('文件保存成功')
@@ -208,7 +257,7 @@ const handleNodeClick = async (data: WorkspaceTreeNode) => {
     try {
       // 获取文件内容并在Univer中打开
       const { getWorkbookContent } = await import('@/api/sugar/sugarWorkspaces')
-      const response = await getWorkbookContent({ id: data.id }) as unknown as ApiResponse<any>
+      const response = await getWorkbookContent({ id: data.id })
       
       if (response?.code === 0) {
         await loadWorkbookInUniver(data, response.data)
@@ -235,7 +284,7 @@ const handleFileCreate = async (data: WorkspaceTreeNode | string | undefined) =>
     try {
       // 获取文件内容
       const { getWorkbookContent } = await import('@/api/sugar/sugarWorkspaces')
-      const response = await getWorkbookContent({ id: data.id }) as unknown as ApiResponse<any>
+      const response = await getWorkbookContent({ id: data.id })
       
       if (response?.code === 0) {
         // 在Univer中创建并打开工作簿
@@ -255,7 +304,7 @@ const handleFileCreate = async (data: WorkspaceTreeNode | string | undefined) =>
 const loadWorkbookInUniver = async (fileData: WorkspaceTreeNode, content: any) => {
   try {
     // 获取Univer核心插件
-    const univerCorePlugin = app.pluginManager?.getPlugin('univer-core') as UniverCorePlugin
+    const univerCorePlugin = pluginManager.registeredPlugins.value.get('univer-core')
     if (!univerCorePlugin) {
       throw new Error('Univer核心插件未找到')
     }
@@ -268,7 +317,7 @@ const loadWorkbookInUniver = async (fileData: WorkspaceTreeNode, content: any) =
     }
 
     // 创建工作簿
-    const workbook = await univerCorePlugin.createWorkbook(workbookData)
+    const workbook = await univerCorePlugin.createWorkbook?.(workbookData)
     console.log('工作簿已在Univer中创建:', workbook)
     
     // 设置当前文件节点
@@ -283,14 +332,12 @@ const loadWorkbookInUniver = async (fileData: WorkspaceTreeNode, content: any) =
 // 处理侧边栏折叠状态变化
 const handleSidebarCollapseChange = (collapsed: boolean) => {
   sidebarCollapsed.value = collapsed
-  // 当侧边栏状态改变时，重新计算容器高度
   updateHeight()
 }
 
 // 处理聊天面板折叠状态变化
 const handleChatCollapseChange = (collapsed: boolean) => {
   chatCollapsed.value = collapsed
-  // 当聊天面板状态改变时，重新计算容器高度
   updateHeight()
 }
 
@@ -304,7 +351,6 @@ const handleToggleChat = () => {
 // 处理团队切换
 const handleTeamChange = (teamId: string) => {
   console.log('团队切换:', teamId)
-  // 这里可以添加团队切换后的逻辑，比如清空当前工作区状态等
   workspace.setCurrentNode(null)
   ElMessage.success('团队切换成功')
 }
@@ -325,13 +371,18 @@ const handleRefreshFormulas = async () => {
     isRefreshing.value = true
     
     // 获取自定义公式插件
-    const customFormulasPlugin = app.pluginManager?.getPlugin('custom-formulas') as CustomFormulasPlugin
+    const customFormulasPlugin = pluginManager.registeredPlugins.value.get('custom-formulas')
     if (!customFormulasPlugin) {
       throw new Error('自定义公式插件未找到')
     }
 
     // 调用插件的刷新方法
-    const result = await customFormulasPlugin.refreshDatabaseFormulas()
+    const result = await customFormulasPlugin.refreshDatabaseFormulas?.()
+    
+    if (!result) {
+      ElMessage.info('插件不支持公式刷新功能')
+      return
+    }
     
     // 根据结果显示相应的消息
     if (result.success > 0 && result.failed === 0) {
@@ -361,15 +412,6 @@ const handleRefreshFormulas = async () => {
         showClose: true
       })
     }
-
-    // 获取统计信息并记录
-    const stats = customFormulasPlugin.getDatabaseFormulaStats()
-    console.log('数据库公式统计:', stats)
-    
-    // 如果有统计信息，在控制台显示详细信息
-    if (stats.total > 0) {
-      console.log(`当前工作簿包含 ${stats.total} 个数据库公式:`, stats.byType)
-    }
     
   } catch (error) {
     console.error('刷新公式失败:', error)
@@ -379,29 +421,51 @@ const handleRefreshFormulas = async () => {
   }
 }
 
-// useApp 组合式函数封装了所有初始化和清理逻辑。
-// 它会在 onMounted 时自动运行，并在 onBeforeUnmount 时自动关闭。
-// 现在还支持 onActivated 和 onDeactivated 来处理keep-alive的状态切换。
-const app = useApp()
+// 创建新文件
+const handleCreateNewFile = async () => {
+  try {
+    const { value: fileName } = await ElMessageBox.prompt('请输入文件名', '创建新文件', {
+      confirmButtonText: '创建',
+      cancelButtonText: '取消',
+      inputPattern: /^[^\\/:*?"<>|]+$/,
+      inputErrorMessage: '文件名不能包含特殊字符'
+    })
+    
+    if (fileName) {
+      // 这里应该调用创建文件的API
+      ElMessage.success(`文件 "${fileName}" 创建成功`)
+    }
+  } catch {
+    // 用户取消
+  }
+}
 
-// 组件挂载时初始化工作空间
-onMounted(() => {
-  workspace.initialize()
-})
+// 打开最近文件
+const handleOpenRecentFile = () => {
+  if (workspace.recentFiles.value.length > 0) {
+    handleNodeClick(workspace.recentFiles.value[0])
+  }
+}
+
+// 获取文件路径
+const getFilePath = (file: WorkspaceTreeNode) => {
+  // 这里应该根据文件的层级关系构建路径
+  return file.parentId ? `/${file.name}` : file.name
+}
 
 // 暴露应用状态供调试使用
 defineExpose({
   app,
+  workspace,
+  pluginManager,
   sidebarRef,
-  chatPanelRef,
-  workspace
+  chatPanelRef
 })
 </script>
 
 <style scoped>
 .sugar-app-container {
   width: 100%;
-  /* height is now set dynamically */
   display: flex;
   flex-direction: row;
 }
@@ -472,6 +536,99 @@ defineExpose({
   border-radius: 0 0 8px 8px;
 }
 
+/* 欢迎页面样式 */
+.welcome-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  border-radius: 8px;
+}
+
+.welcome-content {
+  text-align: center;
+  max-width: 600px;
+  padding: 40px;
+}
+
+.welcome-icon {
+  margin-bottom: 24px;
+}
+
+.welcome-content h2 {
+  font-size: 28px;
+  color: #2c3e50;
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+
+.welcome-content p {
+  font-size: 16px;
+  color: #7f8c8d;
+  margin-bottom: 32px;
+  line-height: 1.6;
+}
+
+.welcome-actions {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  margin-bottom: 40px;
+}
+
+.recent-files {
+  text-align: left;
+}
+
+.recent-files h3 {
+  font-size: 18px;
+  color: #2c3e50;
+  margin-bottom: 16px;
+  border-bottom: 2px solid #3498db;
+  padding-bottom: 8px;
+}
+
+.recent-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recent-file-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: white;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.recent-file-item:hover {
+  background: #f8f9fa;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.recent-file-item .el-icon {
+  color: #3498db;
+  font-size: 18px;
+}
+
+.recent-file-item span:first-of-type {
+  font-weight: 500;
+  color: #2c3e50;
+}
+
+.file-path {
+  font-size: 12px;
+  color: #95a5a6;
+  margin-left: auto;
+}
+
 /* 响应式设计 */
 @media (max-width: 768px) {
   .sugar-app-container {
@@ -496,6 +653,25 @@ defineExpose({
   .current-file-name {
     margin-right: 0;
     margin-bottom: 4px;
+  }
+  
+  .welcome-content {
+    padding: 20px;
+  }
+  
+  .welcome-actions {
+    flex-direction: column;
+    align-items: center;
+  }
+  
+  .recent-file-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  
+  .file-path {
+    margin-left: 0;
   }
 }
 </style>
